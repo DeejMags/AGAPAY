@@ -38,3 +38,6 @@ font-family: 'Poppins', sans-serif;
 .animate-slideUp-delay {
   animation: slideUp 1s cubic-bezier(0.4,0,0.2,1) 0.4s both;
 }
+.animate-slideUp[style] {
+  animation-delay: var(--delay, 0ms);
+}
