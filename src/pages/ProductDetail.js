@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react'
+import { useCart } from '../components/CartContext';
+import FullScreenLoader from '../components/FullScreenLoader'
 import { useParams, useNavigate } from 'react-router-dom'
 import RatingStars from '../components/RatingStars'
 import ProductCard from "../components/ProductCard";
 
 export default function ProductDetail(){
   const { id } = useParams()
+  const { addToCart } = useCart();
   const [product, setProduct] = useState(null)
   const [seller, setSeller] = useState(null)
   const [rating, setRating] = useState(5)
@@ -30,24 +33,7 @@ export default function ProductDetail(){
   },[id])
 
   function submitRating(){
-    const cur = JSON.parse(localStorage.getItem('user') || 'null')
-    if(!cur) return alert('Login to leave a rating')
-    if(!seller) return
-    const users = JSON.parse(localStorage.getItem('agapay_users') || '[]')
-    const idx = users.findIndex(u=>u.id===seller.id)
-    if(idx<0) return
-    users[idx].ratings = users[idx].ratings || []
-    // dedupe: if reviewer already rated, update their rating
-    const existingIdx = users[idx].ratings.findIndex(r => r.reviewerId === cur.id)
-    if(existingIdx >= 0){
-      users[idx].ratings[existingIdx] = { reviewerId: cur.id, ratingValue: Number(rating), comment }
-    } else {
-      users[idx].ratings.push({ reviewerId: cur.id, ratingValue: Number(rating), comment })
-    }
-    localStorage.setItem('agapay_users', JSON.stringify(users))
-    setSeller(users[idx])
-    setComment('')
-    alert('Rating submitted')
+  // Rating submission is disabled until product arrival
   }
 
   function openChat(){
@@ -60,15 +46,7 @@ export default function ProductDetail(){
     }, 50)
   }
 
-  if(loading) return (
-    <div className="py-8 container mx-auto px-4">
-      <div className="animate-pulse">
-        <div className="h-96 bg-gray-200 rounded" />
-        <div className="h-6 bg-gray-200 mt-4 rounded w-1/3" />
-        <div className="h-4 bg-gray-200 mt-2 rounded w-1/4" />
-      </div>
-    </div>
-  )
+  if(loading) return <FullScreenLoader />
 
   if(!product) return <div className="py-8 container mx-auto px-4">Product not found</div>
 
@@ -95,8 +73,8 @@ export default function ProductDetail(){
         </div>
         <h1 className="text-2xl font-bold mt-4">{product.title}</h1>
         <div className="text-xl text-teal-600">\u20b1{product.price}</div>
-        <div className="mt-3 text-gray-700">{product.desc}</div>
-        <div className="mt-2 text-sm text-gray-500">Category: {product.category} \u00b7 Location: {product.location}</div>
+  <div className="mt-3 text-gray-700">{product.desc}</div>
+  <div className="mt-2 text-sm text-gray-500">Category: {product.category} \u00b7 Location: {product.location}</div>
       </div>
       <aside className="md:col-span-1">
         <div className="p-4 border rounded">
@@ -107,6 +85,10 @@ export default function ProductDetail(){
               <div className="text-xs text-gray-500">{seller ? seller.email : ''}</div>
             </div>
           </div>
+          <button
+            className="mt-3 w-full p-2 bg-teal-600 text-white rounded shadow hover:bg-teal-700 transition"
+            onClick={()=>addToCart(product)}
+          >Add to Bag</button>
           <button onClick={openChat} className="mt-3 w-full p-2 bg-teal-600 text-white rounded">Message Seller</button>
           <button onClick={()=> navigate(`/profile/${seller?.id}`)} className="mt-2 w-full p-2 border rounded">View seller profile</button>
         </div>
@@ -123,16 +105,7 @@ export default function ProductDetail(){
           </div>
 
           <div className="mt-3">
-            <h4 className="text-sm font-semibold">Leave a rating</h4>
-            <select value={rating} onChange={e=>setRating(e.target.value)} className="w-full p-2 border rounded mt-2">
-              <option value={5}>5</option>
-              <option value={4}>4</option>
-              <option value={3}>3</option>
-              <option value={2}>2</option>
-              <option value={1}>1</option>
-            </select>
-            <textarea value={comment} onChange={e=>setComment(e.target.value)} className="w-full p-2 border rounded mt-2" placeholder="Optional comment" />
-            <button onClick={submitRating} className="mt-2 w-full p-2 bg-teal-600 text-white rounded">Submit rating</button>
+            {/* Rating UI will be shown only after product arrival logic is implemented. */}
           </div>
         </div>
       </aside>

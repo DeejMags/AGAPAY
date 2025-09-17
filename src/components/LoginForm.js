@@ -8,14 +8,19 @@ export default function LoginForm({ onSuccess }){
   function submit(e){
     e.preventDefault()
     setError('')
-    const users = JSON.parse(localStorage.getItem('agapay_users') || '[]')
+    let users = JSON.parse(localStorage.getItem('agapay_users') || '[]')
+    // Ensure admin account exists
+    if (!users.find(u => u.email === 'admin@agapay.com')) {
+      users.push({ email: 'admin@agapay.com', password: 'admin123', name: 'Admin', role: 'admin' })
+      localStorage.setItem('agapay_users', JSON.stringify(users))
+    }
     const user = users.find(u => u.email === email)
     if(!user) return setError('No account with that email')
     if(user.password !== password) return setError('Wrong password')
     const token = `t_${Math.random().toString(36).slice(2)}`
     localStorage.setItem('token', token)
     localStorage.setItem('user', JSON.stringify(user))
-    if(onSuccess) onSuccess()
+    if(onSuccess) onSuccess(user)
   }
 
   return (
@@ -27,3 +32,6 @@ export default function LoginForm({ onSuccess }){
     </form>
   )
 }
+
+// In Navbar.js, update the redirect logic to:
+// if(user && user.role === 'admin') { navigate('/admin'); }

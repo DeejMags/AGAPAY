@@ -1,11 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import FullScreenLoader from '../components/FullScreenLoader'
+import { useLocation } from 'react-router-dom'
 import ProductCard from '../components/ProductCard'
 import SearchIcon from '../components/SearchIcon'
 
 export default function Marketplace(){
+  const [loading, setLoading] = useState(false)
+  const navigate = useNavigate()
+  const locationHook = useLocation();
+  const params = new URLSearchParams(locationHook.search);
+  const searchQuery = params.get('search') || '';
   const [products, setProducts] = useState([])
   // main filter state
-  const [query, setQuery] = useState('')
+  // Remove local search state, use query from URL
   const [category, setCategory] = useState('')
   const [location, setLocation] = useState('')
   const [minPrice, setMinPrice] = useState('')
@@ -23,23 +31,24 @@ export default function Marketplace(){
   },[])
 
   const filtered = useMemo(()=>{
-  let res = products.filter(p=>{
-      if(query && !p.title.toLowerCase().includes(query.toLowerCase()) && !(p.desc||'').toLowerCase().includes(query.toLowerCase())) return false
+    let res = products.filter(p=>{
+      if(searchQuery && !p.title.toLowerCase().includes(searchQuery.toLowerCase()) && !(p.desc||'').toLowerCase().includes(searchQuery.toLowerCase())) return false
       if(category && p.category !== category) return false
-  // location filter: allow case-insensitive partial matches and handle missing values
-  if(location && !((p.location || '').toString().toLowerCase().includes(location.toString().toLowerCase().trim()))) return false
+      if(location && !((p.location || '').toString().toLowerCase().includes(location.toString().toLowerCase().trim()))) return false
       if(minPrice && Number(p.price) < Number(minPrice)) return false
       if(maxPrice && Number(p.price) > Number(maxPrice)) return false
       return true
-  })
+    })
 
-  if(sortBy === 'low') res = res.sort((a,b)=>Number(a.price)-Number(b.price))
-  if(sortBy === 'high') res = res.sort((a,b)=>Number(b.price)-Number(a.price))
-  if(sortBy === 'alpha') res = res.sort((a,b)=> (a.title||'').toString().toLowerCase().localeCompare((b.title||'').toString().toLowerCase()))
-  if(sortBy === 'newest') res = res.sort((a,b)=> (b._id||'').localeCompare(a._id||'') )
+    if(sortBy === 'low') res = res.sort((a,b)=>Number(a.price)-Number(b.price))
+    if(sortBy === 'high') res = res.sort((a,b)=>Number(b.price)-Number(a.price))
+    if(sortBy === 'alpha') res = res.sort((a,b)=> (a.title||'').toString().toLowerCase().localeCompare((b.title||'').toString().toLowerCase()))
+    if(sortBy === 'newest') res = res.sort((a,b)=> (b._id||'').localeCompare(a._id||'') )
 
-  return res
-  },[products, query, category, location, minPrice, maxPrice, sortBy])
+    return res
+  },[products, searchQuery, category, location, minPrice, maxPrice, sortBy])
+
+  if(loading) return <FullScreenLoader />
 
   return (
     <div className="py-8">
@@ -97,12 +106,6 @@ export default function Marketplace(){
           </aside>
           <div className="md:col-span-3">
             <div className="flex gap-2 items-center mb-2">
-              <div className="relative flex-1">
-                <input placeholder="Search products..." className="w-full p-2 border rounded pl-9" value={query} onChange={e=>setQuery(e.target.value)} />
-                <span className="absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none">
-                  <SearchIcon />
-                </span>
-              </div>
               <select value={sortBy} onChange={e=>setSortBy(e.target.value)} className="p-2 border rounded">
                 <option value="newest">Newest</option>
                 <option value="alpha">Alphabetical (A → Z)</option>
