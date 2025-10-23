@@ -1,5 +1,16 @@
 const express = require('express')
 const cors = require('cors')
+const path = require('path')
+
+// Load environment variables early. Prefer backend/.env.local, then root .env/.env.local
+try {
+	require('dotenv').config({ path: path.join(__dirname, '.env.local') })
+	require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') })
+	require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
+	require('dotenv').config() // fallback to process cwd
+} catch (e) {
+	// noop
+}
 
 const { admin, db } = require('./config/firebaseAdmin'); // Initialize Firebase Admin (may be disabled)
 
