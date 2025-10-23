@@ -8,42 +8,144 @@ import ProductCard from "../components/ProductCard";
 export default function ProductDetail(){
   const { id } = useParams()
   const { addToCart } = useCart();
+  const [adding, setAdding] = useState(false)
   const [product, setProduct] = useState(null)
   const [seller, setSeller] = useState(null)
-  const [rating, setRating] = useState(5)
-  const [comment, setComment] = useState('')
+  // ...existing code...
   const [loading, setLoading] = useState(true)
   const [index, setIndex] = useState(0)
   const navigate = useNavigate()
+  const [recommended, setRecommended] = useState([])
 
   useEffect(()=>{
     setLoading(true)
     const t = setTimeout(()=>{
-      const products = JSON.parse(localStorage.getItem('agapay_products') || '[]')
-      const p = products.find(x=> x._id === id)
-      setProduct(p)
-      if(p && p.sellerId){
-        const users = JSON.parse(localStorage.getItem('agapay_users') || '[]')
-        const s = users.find(u=> u.id === p.sellerId)
-        setSeller(s)
-      }
-      setLoading(false)
+      (async()=>{
+        try {
+          // Try backend product fetch
+          const res = await fetch(`/api/products/${id}`);
+          if (res.ok) {
+            const json = await res.json();
+            setProduct(json);
+            if (json && json.sellerId) {
+              try {
+                const r2 = await fetch(`/api/users/${json.sellerId}`);
+                if (r2.ok) setSeller(await r2.json());
+              } catch (e) { console.warn('Failed to fetch seller profile', e); }
+            }
+            setLoading(false);
+            return;
+          }
+        } catch (err) {
+          // fallback to Firestore lookup
+        }
+        try {
+          const { collection, getDocs } = await import('firebase/firestore');
+          const { db } = await import('../firebase');
+          const snap = await getDocs(collection(db, 'products'));
+          const products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const p = products.find(x=> x._id === id || x.id === id)
+          setProduct(p)
+          if(p && p.sellerId){
+            const usersSnap = await getDocs(collection(db, 'users'));
+            const users = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const s = users.find(u=> u.id === p.sellerId)
+            setSeller(s)
+          }
+        } catch (e) {
+          console.warn('Failed to load product from backend and Firestore', e);
+          setProduct(null);
+        }
+        setLoading(false)
+      })()
     }, 600) // simulate loading
     return ()=> clearTimeout(t)
   },[id])
 
-  function submitRating(){
-  // Rating submission is disabled until product arrival
-  }
+  useEffect(()=>{
+    if(!product){ setRecommended([]); return }
+    (async ()=>{
+      try {
+        const res = await fetch('/api/products');
+        let products = [];
+        if (res.ok) products = await res.json();
+        else throw new Error('API failed');
+        setRecommended((products || []).filter(p=> p._id !== product._id && p.category === product.category).slice(0,4))
+      } catch (err) {
+        try {
+          const { collection, getDocs } = await import('firebase/firestore');
+          const { db } = await import('../firebase');
+          const snap = await getDocs(collection(db, 'products'));
+          const products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          setRecommended(products.filter(p=> p._id !== product._id && p.category === product.category).slice(0,4))
+        } catch (e) { setRecommended([]); }
+      }
+    })()
+  },[product])
+
+  // Increment per-user view count for this product's category (no UI here)
+  useEffect(() => {
+    if (!product || !product.category) return;
+    const catRaw = String(product.category || '').trim();
+    if (!catRaw) return;
+    const catKey = catRaw.replace(/\.+/g, '_');
+
+    (async () => {
+      try {
+        const { auth, db } = await import('../firebase');
+        const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
+        const userId = (auth && auth.currentUser && auth.currentUser.uid) || (storedUser && storedUser.id) || null;
+        const viewerEmail = (auth && auth.currentUser && auth.currentUser.email) || (storedUser && storedUser.email) || null;
+        // Do not count views from the product owner/seller
+        const sellerId = product && product.sellerId ? String(product.sellerId) : null;
+        const ownerEmail = product && product.owner ? String(product.owner) : null;
+        if ((userId && sellerId && String(userId) === sellerId) || (viewerEmail && ownerEmail && viewerEmail === ownerEmail)) {
+          return; // skip increment for owner/seller
+        }
+        if (!userId) {
+          // Fallback to localStorage if user is not signed in
+          const map = JSON.parse(localStorage.getItem('agapay_category_views') || '{}');
+          map[catKey] = Number(map[catKey] || 0) + 1;
+          localStorage.setItem('agapay_category_views', JSON.stringify(map));
+          return;
+        }
+
+        const { doc, setDoc, updateDoc, serverTimestamp, increment } = await import('firebase/firestore');
+        const ref = doc(db, 'user_metrics', userId);
+        // Ensure the metrics doc exists
+        await setDoc(ref, { createdAt: serverTimestamp() }, { merge: true });
+        // Increment the category view counter
+        await updateDoc(ref, { [`categoryViews.${catKey}`]: increment(1), [`categoryLast.${catKey}`]: serverTimestamp() });
+      } catch (e) {
+        // As a last resort, use localStorage tracking so user still sees a count
+        const map = JSON.parse(localStorage.getItem('agapay_category_views') || '{}');
+        map[catKey] = Number(map[catKey] || 0) + 1;
+        localStorage.setItem('agapay_category_views', JSON.stringify(map));
+      }
+    })();
+  }, [product]);
+
+  // ...existing code...
 
   function openChat(){
-    // navigate to messages and pre-select product via a query param
-    navigate('/messages')
-    setTimeout(()=>{
-      // store a marker so Messages can auto-select
-      localStorage.setItem('agapay_active_conv', id)
-      window.location.reload()
-    }, 50)
+    (async () => {
+      try {
+        const { auth } = await import('../firebase');
+        const me = JSON.parse(localStorage.getItem('user') || 'null');
+        const myId = (auth && auth.currentUser && auth.currentUser.uid) || (me && me.id) || 'anon';
+        const productId = product ? (product._id || product.id) : null;
+        const otherId = (seller && seller.id) ? seller.id : (productId ? `seller_${productId}` : 'unknown');
+        const svc = await import('../firebaseMessageService');
+        // Prefer backend start API so the collection/doc is created even if it was deleted previously
+        const convId = await svc.startConversation(otherId, { productId, productName: product ? product.title : null, productImage: Array.isArray(product?.photo) ? product.photo[0] : product?.photo || null });
+        if (convId && typeof convId === 'string') localStorage.setItem('agapay_active_conv', convId);
+        else localStorage.setItem('agapay_active_conv', productId || id);
+        navigate('/messages');
+      } catch (e) {
+        localStorage.setItem('agapay_active_conv', id);
+        navigate('/messages');
+      }
+    })();
   }
 
   if(loading) return <FullScreenLoader />
@@ -52,23 +154,21 @@ export default function ProductDetail(){
 
   const images = Array.isArray(product.photo) ? product.photo : (product.photo ? [product.photo] : [])
 
-  const recommended = (JSON.parse(localStorage.getItem('agapay_products') || '[]') || []).filter(p=> p._id !== product._id && p.category === product.category).slice(0,4)
-
   return (
     <div className="py-8 container mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-6">
       <div className="md:col-span-2">
         <div className="bg-gray-100 rounded overflow-hidden">
           {images.length > 1 ? (
             <div className="relative">
-              <img src={images[index]} alt={`${product.title} - image ${index + 1}`} className="w-full h-96 object-cover" />
+              <img src={images[index]} alt={product.title} className="w-full h-64 sm:h-96 object-cover" />
               <button onClick={()=>setIndex(i=> Math.max(0,i-1))} className="absolute left-2 top-1/2 -translate-y-1/2 bg-white bg-opacity-80 p-2 rounded">‹</button>
               <button onClick={()=>setIndex(i=> Math.min(images.length-1,i+1))} className="absolute right-2 top-1/2 -translate-y-1/2 bg-white bg-opacity-80 p-2 rounded">›</button>
               <div className="flex gap-2 p-2 overflow-auto bg-white">
-                {images.map((im,i)=> <img key={i} src={im} alt={`${product.title} thumbnail ${i+1}`} onClick={()=>setIndex(i)} className={`w-20 h-14 object-cover rounded cursor-pointer ${i===index? 'ring-2 ring-teal-500' : ''}`} />)}
+                {images.map((im,i)=> <img key={i} src={im} alt={product.title} onClick={()=>setIndex(i)} className={`w-12 h-8 sm:w-20 sm:h-14 object-cover rounded cursor-pointer ${i===index? 'ring-2 ring-teal-500' : ''}`} />)}
               </div>
             </div>
           ) : (
-            <img src={images[0] || ''} alt={`${product.title} - image 1`} className="w-full h-96 object-cover" />
+            <img src={images[0] || ''} alt={product.title} className="w-full h-64 sm:h-96 object-cover" />
           )}
         </div>
         <h1 className="text-2xl font-bold mt-4">{product.title}</h1>
@@ -87,10 +187,23 @@ export default function ProductDetail(){
           </div>
           <button
             className="mt-3 w-full p-2 bg-teal-600 text-white rounded shadow hover:bg-teal-700 transition"
-            onClick={()=>addToCart(product)}
-          >Add to Bag</button>
+            onClick={()=>{
+              if (adding) return;
+              setAdding(true);
+              addToCart(product, 1);
+              setTimeout(()=>setAdding(false), 900);
+            }}
+          >{adding ? 'Added ✓' : 'Add to Bag'}</button>
           <button onClick={openChat} className="mt-3 w-full p-2 bg-teal-600 text-white rounded">Message Seller</button>
-          <button onClick={()=> navigate(`/profile/${seller?.id}`)} className="mt-2 w-full p-2 border rounded">View seller profile</button>
+          <button
+            onClick={() => {
+              const target = seller?.id || product?.sellerId || product?.owner;
+              if (target) navigate(`/profile/${target}`);
+            }}
+            className="mt-2 w-full p-2 border rounded"
+          >
+            View seller profile
+          </button>
         </div>
 
         <div className="mt-4 p-4 border rounded">
@@ -114,7 +227,7 @@ export default function ProductDetail(){
         <div className="md:col-span-3 mt-6">
           <h3 className="font-semibold">Recommended for you</h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
-            {recommended.map(r=> <ProductCard key={r._id} product={r} />)}
+            {recommended.map(r=> <ProductCard key={r._id || r.id} product={r} />)}
           </div>
         </div>
       )}

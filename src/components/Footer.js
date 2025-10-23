@@ -1,15 +1,25 @@
 import agapayLogo from "./imgs/agapay-logo.svg";
 
 export default function Footer() {
+  // Compact footer on admin pages to avoid extra scrolling
+  const path = (typeof window !== 'undefined' && window.location && window.location.pathname) ? window.location.pathname : '';
+  let isAdmin = false;
+  try {
+    const u = JSON.parse(localStorage.getItem('user') || 'null');
+    isAdmin = (u && u.role === 'admin') || (path.startsWith('/admin'));
+  } catch {}
+
   return (
-    <footer className="w-full bg-gradient-to-r from-teal-700 to-teal-700 text-white pt-0 pb-6 px-2 sm:px-4 mt-24 relative overflow-hidden">
-      {/* SVG Wave at Top Inside Footer */}
-      <div className="absolute left-0 top-0 w-full overflow-hidden leading-none" style={{height: '80px', zIndex: 2}}>
-        <svg viewBox="0 0 1440 80" width="100%" height="100%" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full" style={{display: 'block'}}>
-          <path d="M0,70 C240,-40 1200,120 1440,10 L1440,0 L0,0 Z" fill="#fff" stroke="#fff" strokeWidth="8" />
-        </svg>
-      </div>
-      <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-start gap-8 md:gap-10 pt-20 px-2 sm:px-0">
+    <footer className={`w-full bg-gradient-to-r from-teal-700 to-teal-700 text-white ${isAdmin ? 'pt-3 pb-4 mt-4' : 'pt-0 pb-6 mt-24'} px-2 sm:px-4 relative overflow-hidden`}>
+      {/* SVG Wave at Top Inside Footer — hidden on admin for compact height */}
+      {!isAdmin && (
+        <div className="absolute left-0 top-0 w-full overflow-hidden leading-none" style={{height: '80px', zIndex: 2}}>
+          <svg viewBox="0 0 1440 80" width="100%" height="100%" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full" style={{display: 'block'}}>
+            <path d="M0,70 C240,-40 1200,120 1440,10 L1440,0 L0,0 Z" fill="#fff" stroke="#fff" strokeWidth="8" />
+          </svg>
+        </div>
+      )}
+      <div className={`max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-start gap-6 md:gap-8 ${isAdmin ? 'pt-4' : 'pt-20'} px-2 sm:px-0`}>
         {/* Logo and Copyright */}
         <div className="flex flex-col items-start mb-6 md:mb-0 w-full md:w-auto">
           <div className="flex items-center mb-2">

@@ -1,11 +1,15 @@
 import React from 'react';
 export default function DashboardOverview({ users, products, orders, messages, points }) {
+  // normalize inputs: they can be arrays or paged responses { items: [] }
+  const usersArr = users ? (Array.isArray(users) ? users : (users.items || [])) : [];
+  const productsArr = products ? (Array.isArray(products) ? products : (products.items || [])) : [];
+  const messagesArr = messages ? (Array.isArray(messages) ? messages : (messages.items || [])) : [];
+
   const stats = [
-    { label: 'Total Users', value: users.length },
-    { label: 'Total Products', value: products.length },
-    { label: 'Total Transactions', value: orders.length },
-    { label: 'Unread Messages', value: messages.filter(m => m.unread || m.status === 'Flagged').length },
-    { label: 'Points Summary', value: points.reduce((acc, p) => acc + p.points, 0) + ' pts' },
+    { label: 'Total Users', value: usersArr.length },
+    { label: 'Total Products', value: productsArr.length },
+    { label: 'Unread Messages', value: messagesArr.filter(m => m.unread || m.status === 'Flagged').length },
+    
   ];
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">

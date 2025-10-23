@@ -1,37 +1,148 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import RatingStars from '../components/RatingStars'
 import ProductCard from '../components/ProductCard'
+import authFetch from '../utils/authFetch'
+import FullScreenLoader from '../components/FullScreenLoader'
 
 export default function Profile(){
+  // ...existing code...
+  // (Ensure all code for Profile component is above this bracket)
+// ...existing code...
+
+function ProfileHeader({ me, onPicChange }) {
+  return (
+    <div className="bg-white border rounded p-4 flex flex-col items-center">
+      <div className="w-40 h-40 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
+        {me && me.profilePic ? <img src={me.profilePic} alt="profile" className="w-full h-full object-cover" /> : <div className="text-gray-500">No photo</div>}
+      </div>
+      <h2 className="mt-4 text-xl font-semibold">{me ? (me.name || me.username) : 'User'}</h2>
+      <div className="text-sm text-gray-600">{me ? me.email : ''}</div>
+      {me && me.phone && <div className="text-sm text-gray-600 mt-1">{me.phone}</div>}
+      {me && me.location && <div className="text-sm text-gray-600 mt-1">{me.location}</div>}
+    </div>
+  );
+}
   const { id } = useParams()
   const [user, setUser] = useState(null)
   const [myProducts, setMyProducts] = useState([])
-  const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState({})
+  const [loading, setLoading] = useState(true)
 
-  useEffect(()=>{
-    const products = JSON.parse(localStorage.getItem('agapay_products') || '[]')
-    if(id){
-      const users = JSON.parse(localStorage.getItem('agapay_users') || '[]')
-      const u = users.find(x=>x.id === id) || null
-      setUser(u)
-      if(u) setMyProducts(products.filter(p=> p.sellerId === u.id))
-    } else {
-      const u = JSON.parse(localStorage.getItem('user') || 'null')
-      setUser(u)
-      if(u) setMyProducts(products.filter(p=> p.sellerId === u.id))
+  useEffect(() => {
+    async function fetchUserByParam(paramId) {
+      // Backend first: supports Firestore doc id, Firebase UID (authId), or email
+      try {
+        const r = await authFetch(`/api/users/${encodeURIComponent(paramId)}`);
+        if (r.ok) return await r.json();
+      } catch (e) {
+        // ignore and try Firestore
+      }
+      try {
+        const { db } = await import('../firebase');
+        const { doc, getDoc, collection, query, where, getDocs } = await import('firebase/firestore');
+        // Try direct doc
+        const directRef = doc(db, 'users', paramId);
+        const directSnap = await getDoc(directRef);
+        if (directSnap.exists()) return { id: directSnap.id, ...directSnap.data() };
+        // Try by authId
+        const q1 = query(collection(db, 'users'), where('authId', '==', paramId));
+        const s1 = await getDocs(q1);
+        if (!s1.empty) return { id: s1.docs[0].id, ...s1.docs[0].data() };
+        // If looks like email, try by email
+        if (typeof paramId === 'string' && paramId.includes('@')) {
+          const q2 = query(collection(db, 'users'), where('email', '==', paramId));
+          const s2 = await getDocs(q2);
+          if (!s2.empty) return { id: s2.docs[0].id, ...s2.docs[0].data() };
+        }
+      } catch (e) {
+        console.warn('Profile: Firestore fallback failed for user lookup', e);
+      }
+      return null;
     }
-  },[id])
 
-  if(!user) return <div className="py-8 container mx-auto px-4">User not found or please log in to see your profile.</div>
+    async function fetchCurrentUser() {
+      // Prefer Firebase auth uid if available, fallback to localStorage
+      try {
+        const { auth } = await import('../firebase');
+        const uid = auth && auth.currentUser ? auth.currentUser.uid : null;
+        const email = auth && auth.currentUser ? auth.currentUser.email : null;
+        if (uid) {
+          const u = await fetchUserByParam(uid);
+          if (u) return u;
+        }
+        if (email) {
+          const u = await fetchUserByParam(email);
+          if (u) return u;
+        }
+      } catch (e) {
+        // ignore
+      }
+      const local = JSON.parse(localStorage.getItem('user') || 'null');
+      if (local && (local.id || local.authId || local.email)) {
+        const key = local.id || local.authId || local.email;
+        const u = await fetchUserByParam(key);
+        if (u) return u;
+        return local; // last resort
+      }
+      return null;
+    }
+
+    async function load() {
+      setLoading(true);
+      // 1) Resolve which user profile to show
+      let profile = null;
+      if (id) profile = await fetchUserByParam(id);
+      else profile = await fetchCurrentUser();
+      setUser(profile);
+
+      // 2) Load products (public API shows active by default)
+      let products = [];
+      try {
+        const res = await fetch('/api/products');
+        if (res.ok) {
+          const json = await res.json();
+          products = Array.isArray(json) ? json : (json.items || []);
+        } else throw new Error('API failed');
+      } catch (err) {
+        try {
+          const { collection, getDocs } = await import('firebase/firestore');
+          const { db } = await import('../firebase');
+          const snap = await getDocs(collection(db, 'products'));
+          products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        } catch (e) {
+          console.warn('Failed to load products for profile', e);
+          products = [];
+        }
+      }
+
+      // 3) Filter listings for the profile owner (match by id, authId, or owner email)
+      if (profile) {
+        const pid = String(profile.id || '');
+        const pauth = String(profile.authId || '');
+        const pemail = String(profile.email || '');
+        const mine = products.filter(p => {
+          const sid = String(p.sellerId || '');
+          const owner = String(p.owner || '');
+          return sid === pid || (pauth && sid === pauth) || (pemail && (sid === pemail || owner === pemail));
+        });
+        setMyProducts(mine);
+      } else {
+        setMyProducts([]);
+      }
+      setLoading(false);
+    }
+    load();
+  }, [id]);
+
+  if (loading) return <FullScreenLoader />
+  if(!user) return <div className="py-8 container mx-auto px-4">User not found.</div>
 
   return (
     <div className="py-8 container mx-auto px-4">
       <div className="flex flex-col md:flex-row gap-6">
         <div className="w-full md:w-1/4">
           {/* Profile header: circular image with edit overlay */}
-          <ProfileHeader me={user} onPicChange={(u)=>{ setUser(u); setForm(fr=> ({ ...fr, profilePic: u.profilePic || fr.profilePic })) }} />
+          <ProfileHeader me={user} onPicChange={(u)=>{ setUser(u); }} />
 
           {/* View / Edit area under header */}
           <div className="mt-4">
@@ -46,36 +157,14 @@ export default function Profile(){
           </div>
         </div>
         <div className="flex-1">
-          <h3 className="font-semibold">My listings</h3>
+          <h3 className="font-semibold">{id ? `${user.username || 'Seller'}'s listings` : 'My listings'}</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
-            {myProducts.length ? myProducts.map(p=> <ProductCard key={p._id} product={p} />) : <div className="p-4 border rounded">No listings yet.</div>}
+            {myProducts.length ? myProducts.map(p=> <ProductCard key={p._id || p.id} product={p} />) : <div className="p-4 border rounded">No listings yet.</div>}
           </div>
         </div>
       </div>
     </div>
   )
 
-  async function fileToBase64(file){
-    return new Promise((res, rej)=>{
-      const r = new FileReader()
-      r.onload = ()=>res(r.result)
-      r.onerror = ()=>rej(new Error('file read'))
-      r.readAsDataURL(file)
-    })
-  }
-}
-
-function ProfileHeader({ me, onPicChange }){
-  // Show profile info only, no edit/upload
-  return (
-    <div className="bg-white border rounded p-4 flex flex-col items-center">
-      <div className="w-40 h-40 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
-        {me && me.profilePic ? <img src={me.profilePic} alt="profile" className="w-full h-full object-cover" /> : <div className="text-gray-500">No photo</div>}
-      </div>
-      <h2 className="mt-4 text-xl font-semibold">{me ? (me.name || me.username) : 'User'}</h2>
-      <div className="text-sm text-gray-600">{me ? me.email : ''}</div>
-      {me && me.phone && <div className="text-sm text-gray-600 mt-1">{me.phone}</div>}
-      {me && me.location && <div className="text-sm text-gray-600 mt-1">{me.location}</div>}
-    </div>
-  )
+  // ...existing code...
 }

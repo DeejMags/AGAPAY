@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SVG wrapper that loads the original PNG `AGAPAY logo.png` from the same folder.
+  Purpose: keep existing references to `AGAPAY logo.svg` but render the original raster artwork.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="titleDesc">
+  <title id="titleDesc">AGAPAY logo</title>
+  <desc>Original AGAPAY logo image shown via SVG wrapper referencing PNG</desc>
+
+  <!-- Reference the PNG in the same folder. Browsers will load the PNG and render it inside the SVG. -->
+  <image href="agapay-logo.png" x="0" y="0" width="400" height="400" preserveAspectRatio="xMidYMid meet" />
+
+</svg>

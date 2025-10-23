@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import FullScreenLoader from '../components/FullScreenLoader'
-import { Link } from 'react-router-dom'
+// ...existing code...
 
 
 import ProductCard from '../components/ProductCard'
@@ -21,29 +21,33 @@ export default function Landing(){
     }
   }, [navigate]);
 
-  function seedProducts(){
-    const demo = [
-      { _id: 'p1', title: 'Vintage Camera', price: 2400, desc: 'Classic film camera', category:'electronics', location:'Manila', photo:'https://images.unsplash.com/photo-1519183071298-a2962be90b3b?auto=format&fit=crop&w=800&q=60' },
-      { _id: 'p2', title: 'Mountain Bike', price: 12000, desc: 'Used mountain bike in good condition', category:'sports', location:'Cebu', photo:'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?auto=format&fit=crop&w=800&q=60' },
-      { _id: 'p3', title: 'Wooden Desk', price: 4500, desc: 'Solid wood desk', category:'furniture', location:'Davao', photo:'https://images.unsplash.com/photo-1519710164239-da123dc03ef4?auto=format&fit=crop&w=800&q=60' },
-      { _id: 'p4', title: 'Smartphone', price: 8000, desc: 'Latest model, barely used', category:'electronics', location:'Quezon City', photo:'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=800&q=60' },
-      { _id: 'p5', title: 'Running Shoes', price: 2200, desc: 'Comfortable and stylish', category:'fashion', location:'Makati', photo:'https://images.unsplash.com/photo-1519864600265-abb224a0f7c4?auto=format&fit=crop&w=800&q=60' },
-      { _id: 'p6', title: 'Coffee Table', price: 3200, desc: 'Modern design, solid wood', category:'furniture', location:'Taguig', photo:'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=60' },
-      { _id: 'p7', title: 'Air Conditioner', price: 15000, desc: 'Energy efficient, 1.5HP', category:'home', location:'Pasig', photo:'https://images.unsplash.com/photo-1465101046530-73398c7f28ca?auto=format&fit=crop&w=800&q=60' },
-      { _id: 'p8', title: 'Tennis Racket', price: 1800, desc: 'Lightweight, great for beginners', category:'sports', location:'Caloocan', photo:'https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?auto=format&fit=crop&w=800&q=60' },
-      { _id: 'p9', title: 'Designer Bag', price: 6500, desc: 'Authentic, gently used', category:'fashion', location:'San Juan', photo:'https://images.unsplash.com/photo-1512436991641-6745cdb1723f?auto=format&fit=crop&w=800&q=60' },
-      { _id: 'p10', title: 'Guitar', price: 3500, desc: 'Acoustic, perfect for beginners', category:'home', location:'Paranaque', photo:'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=800&q=60' }
-    ]
-    localStorage.setItem('agapay_products', JSON.stringify(demo))
-    return demo
-  }
-
   useEffect(()=>{
-    const stored = JSON.parse(localStorage.getItem('agapay_products') || 'null')
-    if(!stored){
-      const seeded = seedProducts()
-      setProducts(seeded)
-    }else setProducts(stored)
+    async function fetchFromApi(){
+      try{
+        setLoading(true)
+        const res = await fetch('/api/products')
+        if(!res.ok) throw new Error('API fetch failed')
+  const data = await res.json()
+  // Backend may return a paged response { items: [...], page, pageSize }
+  const items = Array.isArray(data) ? data : (data.items || []);
+  setProducts(items)
+      }catch(err){
+        // fallback to Firestore client only (do not use localStorage demo data)
+        try {
+          const { collection, getDocs } = await import('firebase/firestore');
+          const { db } = await import('../firebase');
+          const snap = await getDocs(collection(db, 'products'));
+          const firebaseProducts = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setProducts(firebaseProducts);
+        } catch (e) {
+          console.warn('Failed to load products from backend and Firestore', e);
+          setProducts([]);
+        }
+      }finally{
+        setLoading(false)
+      }
+    }
+    fetchFromApi()
   },[])
 
   if(loading) {
@@ -51,22 +55,18 @@ export default function Landing(){
   }
 
   return (
-    <div className="py-8">
-      <div className="container mx-auto px-4">
-        {/* About section directly below navbar, inside main container */}
-        <section
-          id="about"
-          className="py-10 md:py-16 px-2 sm:px-4 md:px-8 lg:px-16 xl:px-32 bg-gray-50 text-center flex flex-col items-center w-full mx-auto"
-          style={{ width: '100%' }}
-        >
+    <div className="pt-0 overflow-x-clip">
+      {/* Full-bleed About/Hero section */}
+      <section id="about" className="relative w-full bg-gray-50 full-bleed overflow-x-clip">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16 text-center">
           <h2
-            className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-teal-500 mb-4 flex items-center justify-center gap-2 mt-20"
+            className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-teal-500 mb-6 flex items-center justify-center gap-2"
             data-aos="fade-down"
             data-aos-delay="100"
           >
             <span>About Agapay</span>
           </h2>
-          <div className="flex flex-col md:flex-row items-center justify-center gap-4 sm:gap-6 md:gap-10 w-full max-w-4xl mx-auto">
+          <div className="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-10 w-full max-w-4xl mx-auto">
             {/* Feature List */}
             <ul className="text-left text-base sm:text-lg text-gray-800 font-semibold space-y-3 sm:space-y-4 flex-1">
               <li className="flex items-center gap-2" data-aos="fade-right" data-aos-delay="200">
@@ -89,7 +89,7 @@ export default function Landing(){
           </div>
           {/* Key Features */}
           <h3
-            className="text-lg sm:text-2xl md:text-3xl font-bold text-teal-400 mt-8 md:mt-12 mb-4 md:mb-6"
+            className="text-lg sm:text-2xl md:text-3xl font-bold text-teal-400 mt-10 mb-6"
             data-aos="fade-down"
             data-aos-delay="400"
           >
@@ -125,20 +125,30 @@ export default function Landing(){
               <span className="font-semibold text-teal-500 text-base sm:text-lg">Circulate</span>
             </div>
           </div>
-        </section>
+        </div>
+      </section>
+
+      {/* Products grid section inside centered container */}
+      <div className="container mx-auto px-4 py-10">
         <h1 className="text-3xl font-bold mb-4">Discover great deals nearby</h1>
-  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 w-full">
-          {products
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 w-full">
+          {(Array.isArray(products) ? products : [])
             .filter(p => !p.status || p.status !== 'Delivered')
-            .map(p=> <ProductCard key={p._id} product={p} />)}
+            .map(p=> <ProductCard key={p._id || p.id} product={p} />)}
         </div>
         <div className="mt-6 text-center">
-          <button className="px-4 py-2 bg-teal-600 text-white rounded" onClick={()=>{
-            setLoading(true);
-            setTimeout(()=>{ navigate('/marketplace'); }, 600);
-          }}>Browse Marketplace</button>
+          <button
+            className="px-4 py-2 bg-teal-600 text-white rounded"
+            onClick={() => {
+              setLoading(true);
+              setTimeout(() => { navigate('/marketplace'); }, 600);
+            }}
+          >
+            Browse Marketplace
+          </button>
         </div>
       </div>
+
       {/* Contact and FAQs sections below the product grid */}
       <Contact />
       <FAQs />

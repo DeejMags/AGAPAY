@@ -6,7 +6,7 @@
 
 body {
   margin: 0;
-  font-family: 'Poppins'sans-serif;
+  font-family: 'Poppins', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -18,6 +18,80 @@ code {
 
 html, body{
 font-family: 'Poppins', sans-serif;
+}
+
+/* Global box-sizing */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* Responsive images and videos */
+img, video {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Forms and buttons should be responsive */
+input, textarea, select, button {
+  max-width: 100%;
+}
+
+/* A simple centered container helper */
+.container {
+  width: 100%;
+  max-width: 1100px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* Small screen tweaks */
+@media (max-width: 640px) {
+  .md\:col-span-2 { grid-column: span 2 / span 2; }
+  .md\:col-span-3 { grid-column: span 3 / span 3; }
+  .text-2xl { font-size: 1.25rem; }
+}
+
+/* Spacing / navbar overlap helpers */
+:root{
+  --nav-height: 72px;
+  --page-gap: 1.5rem;
+}
+
+/* Ensure fixed navbar doesn't overlap content */
+body {
+  padding-top: var(--nav-height);
+}
+
+/* Reduce large vertical paddings on small screens to improve visual density */
+@media (max-width: 640px) {
+  /* Tailwind's py-8 is 2rem by default; reduce it on small screens */
+  .py-8 {
+    padding-top: 1.25rem !important;
+    padding-bottom: 1.25rem !important;
+  }
+  /* Slightly reduce section gaps */
+  .mt-6 { margin-top: 0.75rem !important; }
+  .mb-6 { margin-bottom: 0.75rem !important; }
+}
+
+@media (min-width: 641px) {
+  .py-8 { padding-top: 2rem !important; padding-bottom: 2rem !important; }
+}
+
+/* Full-bleed utility to break out of centered containers without causing layout shift */
+.full-bleed {
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+}
+
+/* Prevent horizontal scrollbar when using full-bleed sections */
+.overflow-x-clip {
+  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 /* Animations */

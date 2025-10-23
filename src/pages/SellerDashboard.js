@@ -1,109 +1,368 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import authFetch from '../utils/authFetch';
+import { auth } from '../firebase';
 import { Link } from 'react-router-dom';
 import ListNewItemModal from '../seller/ListNewItemModal';
 import ListingsPanel from '../seller/ListingsPanel';
-import OrdersPanel from '../seller/OrdersPanel';
-import MessagesPanel from '../seller/MessagesPanel';
-import AnalyticsPanel from '../seller/AnalyticsPanel';
 import ImpactReportPanel from '../seller/ImpactReportPanel';
+import FullScreenLoader from '../components/FullScreenLoader';
 
 export default function SellerDashboard() {
   const [user, setUser] = useState(null);
   const [listings, setListings] = useState([]);
-  const [stats, setStats] = useState({ revenue: 0, active: 0, views: 0, sold: 0 });
+  const [stats, setStats] = useState({ points: 0, active: 0, views: 0, sold: 0 });
   const [modalOpen, setModalOpen] = useState(false);
   const [view, setView] = useState('dashboard'); // dashboard, listings, orders, messages, analytics, impact
+  const [loadingView, setLoadingView] = useState(false);
   const [editItem, setEditItem] = useState(null);
+  const [categoryViews, setCategoryViews] = useState({});
+  const [busy, setBusy] = useState(false); // blocks actions and shows fullscreen loader during network ops
+
+  // Compute nav button classes with a clear active highlight
+  const navBtn = useMemo(() => (current) => {
+    const base = 'w-full text-left flex items-center gap-2 font-medium px-3 py-2 rounded-md transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-teal-300';
+    const inactive = 'text-gray-700 hover:text-teal-700 hover:bg-teal-50';
+    const active = 'text-teal-800 bg-teal-100 border border-teal-300 shadow-sm';
+    return `${base} ${view===current ? active : inactive}`;
+  }, [view]);
 
   useEffect(() => {
-    // Simulate fetching user and listings from localStorage
+    // Fetch user from localStorage and listings from backend (or Firestore fallback)
     const u = JSON.parse(localStorage.getItem('user') || 'null');
     setUser(u);
-    const products = JSON.parse(localStorage.getItem('agapay_products') || '[]');
-    const myListings = products.filter(p => p.sellerId === u?.id);
-    setListings(myListings);
-    // Simulate stats
-    setStats({
-      revenue: 2847,
-      active: myListings.length,
-      views: 1847,
-      sold: myListings.filter(p => p.status === 'sold').length
-    });
+    // Allow other pages (e.g., Reviews) to request a specific starting view
+    const targetView = localStorage.getItem('seller_dashboard_target_view');
+    if (targetView) {
+      setView(targetView);
+      localStorage.removeItem('seller_dashboard_target_view');
+    }
+    async function loadListings(){
+      try {
+        // Wait briefly for Firebase auth to initialize so authFetch can obtain a token
+        if (!auth.currentUser) {
+          await new Promise(resolve => {
+            const timeout = setTimeout(() => { resolve(); }, 2500);
+            const unsub = auth.onAuthStateChanged(user => { clearTimeout(timeout); unsub(); resolve(); });
+          });
+        }
+
+        // Try backend first (authenticated seller view)
+        let res = await authFetch('/api/products?mine=true');
+        if (res.ok) {
+          const json = await res.json();
+          const all = Array.isArray(json) ? json : (json.items || []);
+          const myListings = all.filter(p => p.sellerId === u?.id || p.owner === u?.email || (auth.currentUser && p.sellerId === auth.currentUser.uid));
+          setListings(myListings);
+          return;
+        }
+        // If unauthorized (401) try forcing a token refresh and retry once
+        if (res.status === 401 && auth.currentUser) {
+          try {
+            // Force refresh ID token
+            await auth.currentUser.getIdToken(true);
+            // Retry request
+            res = await authFetch('/api/products?mine=true');
+            if (res.ok) {
+              const json = await res.json();
+              const all = Array.isArray(json) ? json : (json.items || []);
+              const myListings = all.filter(p => p.sellerId === u?.id || p.owner === u?.email || (auth.currentUser && p.sellerId === auth.currentUser.uid));
+              setListings(myListings);
+              return;
+            }
+          } catch (e) {
+            console.warn('Retry after token refresh failed', e && e.message);
+          }
+        }
+
+        // If unauthorized or other error, capture status and fall back to Firestore
+        console.warn('SellerDashboard backend responded with', res.status);
+      } catch (err) {
+        console.warn('SellerDashboard backend fetch error', err && err.message);
+      }
+
+      // Firestore fallback: filter by localStorage user id OR firebase auth uid OR owner email
+      try {
+        const { collection, getDocs } = await import('firebase/firestore');
+        const { db } = await import('../firebase');
+        const snap = await getDocs(collection(db, 'products'));
+        const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const myListings = all.filter(p => {
+          const sellerMatch = (u && p.sellerId && (p.sellerId === u.id || p.sellerId === u.uid)) || (auth.currentUser && p.sellerId === auth.currentUser.uid);
+          const ownerMatch = u && (p.owner === u?.email);
+          return Boolean(sellerMatch || ownerMatch);
+        });
+        setListings(myListings);
+      } catch (e) {
+        console.warn('Failed to load products for seller dashboard', e);
+        setListings([]);
+      }
+    }
+    loadListings();
+    // Load per-user category views for dashboard widget
+    (async () => {
+      try {
+        const { auth, db } = await import('../firebase');
+        const uid = (auth && auth.currentUser && auth.currentUser.uid) || u?.id || null;
+        if (!uid) {
+          // localStorage fallback
+          const map = JSON.parse(localStorage.getItem('agapay_category_views') || '{}');
+          setCategoryViews(map);
+          const total = Object.values(map).reduce((a,b)=> a + (Number(b)||0), 0);
+          setStats(prev => ({ ...prev, views: total }));
+          return;
+        }
+        const { doc, getDoc } = await import('firebase/firestore');
+        const ref = doc(db, 'user_metrics', uid);
+        const snap = await getDoc(ref);
+        const data = snap.exists() ? snap.data() : {};
+        const cv = data.categoryViews || {};
+        setCategoryViews(cv);
+        const total = Object.values(cv).reduce((a,b)=> a + (Number(b)||0), 0);
+        setStats(prev => ({ ...prev, views: total }));
+      } catch (e) {
+        const map = JSON.parse(localStorage.getItem('agapay_category_views') || '{}');
+        setCategoryViews(map);
+        const total = Object.values(map).reduce((a,b)=> a + (Number(b)||0), 0);
+        setStats(prev => ({ ...prev, views: total }));
+      }
+    })();
+    // Listen for product updates from admin and refresh listings
+    const onProductUpdated = () => { loadListings(); };
+    window.addEventListener('product-updated', onProductUpdated);
+    return () => { window.removeEventListener('product-updated', onProductUpdated); };
   }, []);
+
+  // Derive active/sold counts from listings whenever they change
+  useEffect(() => {
+    const norm = s => (s || '').toString().toLowerCase();
+    const activeCount = listings.filter(p => norm(p.status) === 'active').length;
+    const soldCount = listings.filter(p => norm(p.status) === 'sold').length;
+    setStats(prev => ({ ...prev, active: activeCount, sold: soldCount }));
+  }, [listings]);
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r flex flex-col py-6 px-4">
-        <div className="text-2xl font-bold text-teal-600 mb-8">Agapay</div>
+        <div className="text-2xl font-bold text-teal-600 mb-8">Seller Dashboard</div>
         <nav className="flex-1">
           <ul className="space-y-2">
-            <li><button className={`w-full text-left flex items-center gap-2 text-gray-700 hover:text-teal-600 font-medium ${view==='dashboard'?'font-bold':''}`} onClick={()=>setView('dashboard')}><span>🏠</span> Dashboard</button></li>
-            <li><button className={`w-full text-left flex items-center gap-2 text-gray-700 hover:text-teal-600 font-medium ${view==='listings'?'font-bold':''}`} onClick={()=>setView('listings')}><span>📦</span> My Listings</button></li>
-            <li><button className={`w-full text-left flex items-center gap-2 text-gray-700 hover:text-teal-600 font-medium ${view==='orders'?'font-bold':''}`} onClick={()=>setView('orders')}><span>🛒</span> Orders</button></li>
-            <li><button className={`w-full text-left flex items-center gap-2 text-gray-700 hover:text-teal-600 font-medium ${view==='messages'?'font-bold':''}`} onClick={()=>setView('messages')}><span>💬</span> Messages</button></li>
+            <li>
+              <button
+                className={`relative ${navBtn('dashboard')}`}
+                aria-current={view==='dashboard' ? 'page' : undefined}
+                onClick={() => { setLoadingView(true); setTimeout(()=>{ setView('dashboard'); setLoadingView(false); }, 200); }}
+              >
+                {view==='dashboard' && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-teal-500 rounded-r"></span>}
+                <span className="w-5 text-lg">🏠</span>
+                <span>Dashboard</span>
+              </button>
+            </li>
+            <li>
+              <button
+                className={`relative ${navBtn('listings')}`}
+                aria-current={view==='listings' ? 'page' : undefined}
+                onClick={() => { setLoadingView(true); setTimeout(()=>{ setView('listings'); setLoadingView(false); }, 200); }}
+              >
+                {view==='listings' && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-teal-500 rounded-r"></span>}
+                <span className="w-5 text-lg">📦</span>
+                <span>My Listings</span>
+              </button>
+            </li>
           </ul>
-          <div className="mt-8">
+            <div className="mt-8">
             <div className="text-xs text-gray-500 mb-2">Business</div>
             <ul className="space-y-2">
-              <li><button className={`w-full text-left flex items-center gap-2 text-gray-700 hover:text-teal-600 font-medium ${view==='analytics'?'font-bold':''}`} onClick={()=>setView('analytics')}><span>📊</span> Analytics</button></li>
-              <li><button className={`w-full text-left flex items-center gap-2 text-gray-700 hover:text-teal-600 font-medium ${view==='impact'?'font-bold':''}`} onClick={()=>setView('impact')}><span>🌱</span> Impact Report</button></li>
-              <li><Link to="/performance" className="flex items-center gap-2 text-gray-700 hover:text-teal-600 font-medium"><span>📈</span> Performance</Link></li>
-              <li><Link to="/reviews" className="flex items-center gap-2 text-gray-700 hover:text-teal-600 font-medium"><span>⭐</span> Reviews</Link></li>
+              <li>
+                <button
+                  className={`relative ${navBtn('impact')}`}
+                  aria-current={view==='impact' ? 'page' : undefined}
+                  onClick={()=>{ setLoadingView(true); setTimeout(()=>{ setView('impact'); setLoadingView(false); }, 200); }}
+                >
+                  {view==='impact' && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-teal-500 rounded-r"></span>}
+                  <span className="w-5 text-lg">🌱</span>
+                  <span>Impact Report</span>
+                </button>
+              </li>
+              <li>
+                <Link to="/reviews" className="flex items-center gap-2 text-gray-700 hover:text-teal-700 hover:bg-teal-50 px-3 py-2 rounded-md">
+                  <span className="w-5 text-lg">⭐</span>
+                  <span>Reviews</span>
+                </Link>
+              </li>
             </ul>
           </div>
           <div className="mt-8">
             <div className="text-xs text-gray-500 mb-2">Community</div>
             <ul className="space-y-2">
-              <li><Link to="/community" className="flex items-center gap-2 text-gray-700 hover:text-teal-600 font-medium"><span>👥</span> Community</Link></li>
-              <li><Link to="/settings" className="flex items-center gap-2 text-gray-700 hover:text-teal-600 font-medium"><span>⚙️</span> Settings</Link></li>
+              <li>
+                <Link to="/community" className="flex items-center gap-2 text-gray-700 hover:text-teal-700 hover:bg-teal-50 px-3 py-2 rounded-md">
+                  <span className="w-5 text-lg">👥</span>
+                  <span>Community</span>
+                </Link>
+              </li>
             </ul>
           </div>
         </nav>
       </aside>
       {/* Main Content */}
       <main className="flex-1 p-8">
+        {(loadingView || busy) && <FullScreenLoader />}
+        {/* debug panel removed */}
         {view === 'dashboard' && (
           <>
-            <div className="bg-teal-100 rounded-xl p-8 mb-8">
-              <h1 className="text-3xl font-bold text-teal-900 mb-2">Welcome back to your sustainable marketplace</h1>
-              <p className="text-teal-800">Continue building the circular economy, one item at a time</p>
-            </div>
             <section className="mb-8">
               <h2 className="text-2xl font-bold mb-4">Your Marketplace</h2>
               <p className="text-gray-600 mb-6">Manage your listings and track your impact</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 mb-6">
                 <div className="bg-white rounded-lg shadow p-6 flex flex-col items-start">
-                  <div className="text-xs text-gray-500 mb-1">Total Revenue</div>
-                  <div className="text-2xl font-bold">${stats.revenue.toLocaleString()}</div>
-                  <div className="text-green-600 text-xs mt-1">+12.5% from last month</div>
+                  <div className="text-xs text-gray-500 mb-1">Points</div>
+                  <div className="text-2xl font-bold">{stats.points.toLocaleString()} pts</div>
                 </div>
                 <div className="bg-white rounded-lg shadow p-6 flex flex-col items-start">
                   <div className="text-xs text-gray-500 mb-1">Active Listings</div>
                   <div className="text-2xl font-bold">{stats.active}</div>
-                  <div className="text-green-600 text-xs mt-1">+8 items from last month</div>
                 </div>
-                <div className="bg-white rounded-lg shadow p-6 flex flex-col items-start">
+                <div className="bg-white rounded-lg shadow p-6 flex flex-col items-start w-full">
                   <div className="text-xs text-gray-500 mb-1">Views</div>
                   <div className="text-2xl font-bold">{stats.views.toLocaleString()}</div>
-                  <div className="text-green-600 text-xs mt-1">+32.1% from last month</div>
+                  {categoryViews && Object.keys(categoryViews).length > 0 && (
+                    <ul className="mt-2 w-full text-xs text-gray-600 grid grid-cols-1 gap-y-1">
+                      {Object.entries(categoryViews)
+                        .sort((a,b)=> (Number(b[1])||0) - (Number(a[1])||0))
+                        .slice(0,4)
+                        .map(([k,v]) => (
+                          <li key={k} className="flex justify-between w-full">
+                            <span className="capitalize truncate">{k.replace(/_/g,' ')}</span>
+                            <span className="font-medium ml-2">{Number(v) || 0}</span>
+                          </li>
+                        ))}
+                    </ul>
+                  )}
                 </div>
                 <div className="bg-white rounded-lg shadow p-6 flex flex-col items-start">
                   <div className="text-xs text-gray-500 mb-1">Items Sold</div>
                   <div className="text-2xl font-bold">{stats.sold}</div>
-                  <div className="text-green-600 text-xs mt-1">+4 this week from last month</div>
                 </div>
               </div>
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-semibold">Your Listings</h3>
                 <button className="bg-teal-600 text-white px-4 py-2 rounded hover:bg-teal-700 font-medium" onClick={()=>{setModalOpen(true); setEditItem(null);}}>+ List New Item</button>
               </div>
+              {/* Available listings (not sold) */}
               <ListingsPanel
-                listings={listings}
-                onEdit={item => {setEditItem(item); setModalOpen(true);}}
-                onDelete={id => setListings(listings => listings.filter(l => l.id !== id))}
-                onView={item => alert('View: ' + item.title)}
+                listings={listings.filter(p => (p.status || '').toLowerCase() !== 'sold')}
+                disabled={busy}
+                onEdit={item => { if (busy) return; setEditItem(item); setModalOpen(true); }}
+                onDelete={id => {
+                  if (busy) return;
+                  setBusy(true);
+                  // Remove from local listings and request backend deletion (fallback to Firestore)
+                  setListings(listings => listings.filter(l => l.id !== id && l._id !== id));
+                  (async()=>{
+                    try {
+                      const res = await authFetch(`/api/products/${id}`, { method: 'DELETE' });
+                      if (!res.ok) throw new Error('API delete failed');
+                    } catch (err) {
+                      try {
+                        const { doc, deleteDoc } = await import('firebase/firestore');
+                        const { db } = await import('../firebase');
+                        await deleteDoc(doc(db, 'products', id));
+                      } catch(e) {
+                        console.warn('Failed to delete product on backend and Firestore', e);
+                      }
+                    } finally {
+                      setBusy(false);
+                    }
+                  })();
+                }}
+                onView={item => {
+                  if (busy) return;
+                  // Navigate to product detail page
+                  window.location.href = `/product/${item.id || item._id}`;
+                }}
+                onStatusChange={(id, status) => {
+                  if (busy) return;
+                  setBusy(true);
+                  // Optimistic UI update
+                  setListings(prev => prev.map(p => (p.id === id || p._id === id) ? { ...p, status } : p));
+                  (async()=>{
+                    try {
+                      const res = await authFetch(`/api/products/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ status })
+                      });
+                      if (!res.ok) throw new Error('API update failed');
+                    } catch (err) {
+                      // Firestore fallback
+                      try {
+                        const { doc, updateDoc } = await import('firebase/firestore');
+                        const { db } = await import('../firebase');
+                        await updateDoc(doc(db, 'products', id), { status });
+                      } catch (e) {
+                        console.warn('Failed to update product status on backend and Firestore', e);
+                      }
+                    } finally {
+                      setBusy(false);
+                    }
+                  })();
+                }}
               />
+              {/* Sold items grid */}
+              {listings.some(p => (p.status || '').toLowerCase() === 'sold') && (
+                <>
+                  <h4 className="text-lg font-semibold mt-8 mb-3">Sold Items</h4>
+                  <ListingsPanel
+                    listings={listings.filter(p => (p.status || '').toLowerCase() === 'sold')}
+                    disabled={busy}
+                    onEdit={item => { if (busy) return; setEditItem(item); setModalOpen(true); }}
+                    onDelete={id => {
+                      if (busy) return;
+                      setBusy(true);
+                      setListings(listings => listings.filter(l => l.id !== id && l._id !== id));
+                      (async()=>{
+                        try {
+                          const res = await authFetch(`/api/products/${id}`, { method: 'DELETE' });
+                          if (!res.ok) throw new Error('API delete failed');
+                        } catch (err) {
+                          try {
+                            const { doc, deleteDoc } = await import('firebase/firestore');
+                            const { db } = await import('../firebase');
+                            await deleteDoc(doc(db, 'products', id));
+                          } catch(e) {
+                            console.warn('Failed to delete product on backend and Firestore', e);
+                          }
+                        } finally {
+                          setBusy(false);
+                        }
+                      })();
+                    }}
+                    onView={item => { if (busy) return; window.location.href = `/product/${item.id || item._id}`; }}
+                    onStatusChange={(id, status) => {
+                      if (busy) return;
+                      setBusy(true);
+                      setListings(prev => prev.map(p => (p.id === id || p._id === id) ? { ...p, status } : p));
+                      (async()=>{
+                        try {
+                          const res = await authFetch(`/api/products/${id}`, {
+                            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status })
+                          });
+                          if (!res.ok) throw new Error('API update failed');
+                        } catch (err) {
+                          try {
+                            const { doc, updateDoc } = await import('firebase/firestore');
+                            const { db } = await import('../firebase');
+                            await updateDoc(doc(db, 'products', id), { status });
+                          } catch (e) { console.warn('Failed to update product status on backend and Firestore', e); }
+                        } finally {
+                          setBusy(false);
+                        }
+                      })();
+                    }}
+                  />
+                </>
+              )}
             </section>
           </>
         )}
@@ -113,29 +372,133 @@ export default function SellerDashboard() {
               <h3 className="text-xl font-semibold">My Listings</h3>
               <button className="bg-teal-700 text-white px-4 py-2 rounded hover:bg-teal-700 font-medium" onClick={()=>{setModalOpen(true); setEditItem(null);}}>+ List New Item</button>
             </div>
+            {/* Available listings (not sold) */}
             <ListingsPanel
-              listings={listings}
-              onEdit={item => {setEditItem(item); setModalOpen(true);}}
-              onDelete={id => setListings(listings => listings.filter(l => l.id !== id))}
-              onView={item => alert('View: ' + item.title)}
+              listings={listings.filter(p => (p.status || '').toLowerCase() !== 'sold')}
+              disabled={busy}
+              onEdit={item => { if (busy) return; setEditItem(item); setModalOpen(true); }}
+              onDelete={id => {
+                if (busy) return;
+                setBusy(true);
+                setListings(listings => listings.filter(l => l.id !== id && l._id !== id));
+                (async()=>{
+                  try {
+                    const res = await authFetch(`/api/products/${id}`, { method: 'DELETE' });
+                    if (!res.ok) throw new Error('API delete failed');
+                  } catch (err) {
+                    try {
+                      const { doc, deleteDoc } = await import('firebase/firestore');
+                      const { db } = await import('../firebase');
+                      await deleteDoc(doc(db, 'products', id));
+                    } catch(e) {
+                      console.warn('Failed to delete product on backend and Firestore', e);
+                    }
+                  } finally {
+                    setBusy(false);
+                  }
+                })();
+              }}
+              onView={item => {
+                if (busy) return;
+                window.location.href = `/product/${item.id || item._id}`;
+              }}
+              onStatusChange={(id, status) => {
+                if (busy) return;
+                setBusy(true);
+                setListings(prev => prev.map(p => (p.id === id || p._id === id) ? { ...p, status } : p));
+                (async()=>{
+                  try {
+                    const res = await authFetch(`/api/products/${id}`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ status })
+                    });
+                    if (!res.ok) throw new Error('API update failed');
+                  } catch (err) {
+                    try {
+                      const { doc, updateDoc } = await import('firebase/firestore');
+                      const { db } = await import('../firebase');
+                      await updateDoc(doc(db, 'products', id), { status });
+                    } catch (e) {
+                      console.warn('Failed to update product status on backend and Firestore', e);
+                    }
+                  } finally {
+                    setBusy(false);
+                  }
+                })();
+              }}
             />
+            {/* Sold items grid */}
+            {listings.some(p => (p.status || '').toLowerCase() === 'sold') && (
+              <>
+                <h4 className="text-lg font-semibold mt-8 mb-3">Sold Items</h4>
+                <ListingsPanel
+                  listings={listings.filter(p => (p.status || '').toLowerCase() === 'sold')}
+                  disabled={busy}
+                  onEdit={item => { if (busy) return; setEditItem(item); setModalOpen(true); }}
+                  onDelete={id => {
+                    if (busy) return;
+                    setBusy(true);
+                    setListings(listings => listings.filter(l => l.id !== id && l._id !== id));
+                    (async()=>{
+                      try {
+                        const res = await authFetch(`/api/products/${id}`, { method: 'DELETE' });
+                        if (!res.ok) throw new Error('API delete failed');
+                      } catch (err) {
+                        try {
+                          const { doc, deleteDoc } = await import('firebase/firestore');
+                          const { db } = await import('../firebase');
+                          await deleteDoc(doc(db, 'products', id));
+                        } catch(e) { console.warn('Failed to delete product on backend and Firestore', e); }
+                      } finally {
+                        setBusy(false);
+                      }
+                    })();
+                  }}
+                  onView={item => { if (busy) return; window.location.href = `/product/${item.id || item._id}`; }}
+                  onStatusChange={(id, status) => {
+                    if (busy) return;
+                    setBusy(true);
+                    setListings(prev => prev.map(p => (p.id === id || p._id === id) ? { ...p, status } : p));
+                    (async()=>{
+                      try {
+                        const res = await authFetch(`/api/products/${id}`, {
+                          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status })
+                        });
+                        if (!res.ok) throw new Error('API update failed');
+                      } catch (err) {
+                        try {
+                          const { doc, updateDoc } = await import('firebase/firestore');
+                          const { db } = await import('../firebase');
+                          await updateDoc(doc(db, 'products', id), { status });
+                        } catch (e) { console.warn('Failed to update product status on backend and Firestore', e); }
+                      } finally {
+                        setBusy(false);
+                      }
+                    })();
+                  }}
+                />
+              </>
+            )}
           </section>
         )}
-        {view === 'orders' && <OrdersPanel />}
-        {view === 'messages' && <MessagesPanel />}
-        {view === 'analytics' && <AnalyticsPanel />}
+  {/* Analytics panel removed per request */}
         {view === 'impact' && <ImpactReportPanel />}
         <ListNewItemModal
           open={modalOpen}
           onClose={()=>{setModalOpen(false); setEditItem(null);}}
+          editItem={editItem}
+          onUpdate={(updated)=>{
+            setListings(prev => prev.map(p => (p.id === updated.id || p._id === updated.id) ? { ...p, ...updated } : p));
+          }}
           onAdd={item => {
             // Add new item with status 'pending' for admin approval
-            const newItem = { ...item, sellerId: user?.id, status: 'pending' };
+            const newId = item.id || item._id || Date.now();
+            const newItem = { ...item, id: newId, _id: newId, sellerId: user?.id, status: 'pending' };
             // Update local listings state
             setListings(listings => [...listings, newItem]);
-            // Update global products in localStorage
-            const products = JSON.parse(localStorage.getItem('agapay_products') || '[]');
-            localStorage.setItem('agapay_products', JSON.stringify([...products, newItem]));
+            // Do NOT persist here to avoid double-creating.
+            // The modal already handles creating the product via backend (with Firestore fallback).
           }}
         />
       </main>

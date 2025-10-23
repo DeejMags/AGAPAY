@@ -1,9 +1,12 @@
-const express = require('express')
-const router = express.Router()
-const { signup, login, logout } = require('../controllers/authController')
+// backend/routes/authRoutes.js
+const express = require('express');
+const router = express.Router();
 
-router.post('/signup', signup)
-router.post('/login', login)
-router.post('/logout', logout)
+// Import the correct controller (no ".firebase" extension anymore)
+const { register, login } = require('../controllers/authController');
 
-module.exports = router
+router.post('/signup', register);
+router.post('/login', login);
+router.post('/google', require('../controllers/authController').google);
+
+module.exports = router;

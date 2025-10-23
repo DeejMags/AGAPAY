@@ -17,13 +17,16 @@ import AdminDashboard from './admin/AdminDashboard'
 import SellerDashboard from './pages/SellerDashboard'
 import Listings from './pages/Listings'
 import UserSettings from './pages/UserSettings'
+import Reviews from './seller/Reviews'
+import Community from './seller/Community'
 
 function App(){
   return (
     <BrowserRouter>
       <Navbar />
-      <div className="pt-20 min-h-screen flex flex-col">
-        <div className="flex-1">
+      <div className="min-h-screen flex flex-col">
+        {/* Make route content full-width so admin and seller dashboards fit the window */}
+        <div className="flex-1 w-full px-3 sm:px-4">
           <Routes>
             <Route path="/" element={<Landing/>} />
             <Route path="/marketplace" element={<Marketplace/>} />
@@ -39,6 +42,8 @@ function App(){
             <Route path="/listings" element={<ProtectedRoute><Listings/></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><SellerDashboard/></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><UserSettings/></ProtectedRoute>} />
+            <Route path="/reviews" element={<ProtectedRoute><Reviews/></ProtectedRoute>} />
+            <Route path="/community" element={<ProtectedRoute><Community/></ProtectedRoute>} />
             <Route path="*" element={<NotFound/>} />
           </Routes>
         </div>

@@ -1,15 +1,43 @@
-const jwt = require('jsonwebtoken')
-const User = require('../models/User')
+const { admin, db } = require('../config/firebaseAdmin');
 
-async function authMiddleware(req,res,next){
-  const auth = req.headers.authorization
-  if(!auth) return res.status(401).json({ message: 'No token' })
-  const token = auth.split(' ')[1]
-  try{
-    const payload = jwt.verify(token, process.env.JWT_SECRET || 'devsecret')
-    req.user = await User.findById(payload.id).select('-password')
-    next()
-  }catch(err){ res.status(401).json({ message: 'Invalid token' }) }
+async function authMiddleware(req, res, next) {
+  // Local dev helper: set SKIP_AUTH=true in env to bypass token verification.
+  // Only allow this bypass in development mode to avoid accidental bypass in production.
+  // If Firebase is disabled we shortcut auth and attach a dev user so routes still work
+  if (process.env.DISABLE_FIREBASE === 'true') {
+    req.user = { uid: 'dev', id: 'dev', email: 'dev@local', role: 'dev' };
+    return next();
+  }
+  // Local dev helper: set SKIP_AUTH=true in env to bypass token verification.
+  // Only allow this bypass in development mode to avoid accidental bypass in production.
+  if (process.env.SKIP_AUTH === 'true' && process.env.NODE_ENV === 'development') {
+    req.user = { uid: 'dev', email: 'dev@local', role: 'dev' };
+    return next();
+  }
+  const auth = req.headers.authorization;
+  if (!auth) return res.status(401).json({ message: 'No token' });
+
+  const token = auth.split(' ')[1];
+  try {
+    // Verify Firebase ID token
+    const decoded = await admin.auth().verifyIdToken(token);
+
+    // Try to load user profile from Firestore (optional)
+    const userDoc = await db.collection('users').doc(decoded.uid).get();
+    if (userDoc.exists) {
+      const user = userDoc.data();
+      delete user.password;
+      req.user = { uid: decoded.uid, id: userDoc.id, ...user };
+    } else {
+      // If no profile exists in Firestore, attach the decoded token info
+      req.user = { uid: decoded.uid, email: decoded.email, ...decoded };
+    }
+
+    next();
+  } catch (err) {
+    console.error('Auth error:', err);
+    res.status(401).json({ message: 'Invalid token' });
+  }
 }
 
-module.exports = authMiddleware
+module.exports = authMiddleware;

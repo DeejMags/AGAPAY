@@ -7,7 +7,7 @@ const data = {
   labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
   datasets: [
     {
-      label: 'Revenue',
+      label: 'Points',
       data: [500, 800, 1200, 900, 1500, 1800],
       backgroundColor: 'rgba(16, 185, 129, 0.7)',
     },

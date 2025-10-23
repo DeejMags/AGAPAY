@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
+// Use the image from the public folder via an absolute URL at runtime
 import FullScreenLoader from './FullScreenLoader';
 import { Link, useNavigate } from 'react-router-dom';
 import SearchIcon from './SearchIcon';
 import AuthModal from './AuthModal';
 import { useCart } from './CartContext';
 import CartModal from './CartModal';
+import QuickMessagesButton from './QuickMessagesButton';
 
 export default function Navbar(){
   const { cart } = useCart();
@@ -48,15 +50,6 @@ export default function Navbar(){
     }, 700);
   }
 
-  function handleMessagesClick(e) {
-    e.preventDefault();
-    setLoading(true);
-    setTimeout(() => {
-      navigate('/messages');
-      setLoading(false);
-    }, 700);
-  }
-
   return (
     <>
       {loading && <FullScreenLoader />}
@@ -64,14 +57,14 @@ export default function Navbar(){
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link to="/" className="flex items-center gap-3" onClick={() => { window.scrollTo({top: 0, behavior: 'smooth'}); }}>
-              <img src="/assets/AGAPAY logo.png" alt="Agapay" className="w-16 h-16 object-contain" />
+              <img src="/assets/agapay-logo.png" alt="Agapay" className="w-12 h-12 sm:w-16 sm:h-16 object-contain" />
               <span className="font-bold text-xl text-teal-600 tracking-wide" style={{letterSpacing:'2px'}}>AGAPAY</span>
             </Link>
           </div>
 
         {(!user || user.role !== 'admin') && (
-          <form className="flex-1 mx-8" onSubmit={e=>{e.preventDefault(); navigate(`/marketplace?search=${encodeURIComponent(search)}`);}}>
-            <div className="relative w-full max-w-lg mx-auto flex items-center gap-2">
+            <form className="flex-1 mx-2 sm:mx-8" onSubmit={e=>{e.preventDefault(); navigate(`/marketplace?search=${encodeURIComponent(search)}`);}}>
+            <div className="relative w-full max-w-xs sm:max-w-lg mx-auto flex items-center gap-2">
               <span className="cursor-pointer" onClick={handleMarketClick} aria-label="Marketplace">
                 <svg xmlns="http://www.w3.org/2000/svg" height="36" viewBox="0 -960 960 960" width="36" fill="#036c5f">
                   <path d="M160-740v-60h642v60H160Zm5 580v-258h-49v-60l44-202h641l44 202v60h-49v258h-60v-258H547v258H165Zm60-60h262v-198H225v198Zm-50-258h611-611Zm0 0h611l-31-142H206l-31 142Z"/>
@@ -97,6 +90,18 @@ export default function Navbar(){
                   <span className="absolute -top-2 -right-2 inline-flex items-center justify-center w-5 h-5 text-xs bg-teal-600 text-white rounded-full">{cart.length}</span>
                 )}
               </Link>
+              {/* Bell / Notifications icon */}
+              <button
+                onClick={(e)=>{ e.preventDefault(); navigate('/notifications'); }}
+                className="relative ml-3 cursor-pointer"
+                aria-label="Notifications"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" height="32" viewBox="0 -960 960 960" width="32" fill="#036c5f">
+                  <path d="M160-200v-60h80v-304q0-84 49.5-150.5T420-798v-22q0-25 17.5-42.5T480-880q25 0 42.5 17.5T540-820v22q81 17 130.5 83.5T720-564v304h80v60H160Zm320-302Zm0 422q-33 0-56.5-23.5T400-160h160q0 33-23.5 56.5T480-80ZM300-260h360v-304q0-75-52.5-127.5T480-744q-75 0-127.5 52.5T300-564v304Z"/>
+                </svg>
+                {/* optional unread badge placeholder (hidden by default) */}
+                {/* <span className="absolute -top-2 -right-2 inline-flex items-center justify-center w-4 h-4 text-xs bg-red-600 text-white rounded-full">3</span> */}
+              </button>
             </div>
           </form>
         )}
@@ -111,9 +116,15 @@ export default function Navbar(){
             <div className="relative" ref={ref}>
               <button onClick={()=>setMenuOpen(v=>!v)} className="flex items-center gap-2">
                 {user && user.profilePic ? (
-                  <img src={user.profilePic} alt={`${user.username} avatar`} className="w-8 h-8 object-cover rounded-full" />
+                  <img src={user.profilePic} alt={`${user.username} avatar`} className="w-9 h-9 object-cover rounded-full" />
                 ) : (
-                  <div className="w-8 h-8 bg-gray-200 rounded-full" />
+                  // render teal circular avatar with person svg for logged-in users without a profilePic
+                  <div className="w-9 h-9 bg-teal-600 rounded-full flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="feather feather-user">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                  </div>
                 )}
                 <span className="hidden sm:inline">{user.username}</span>
               </button>
@@ -135,7 +146,9 @@ export default function Navbar(){
       </div>
   </nav>
   <CartModal open={cartOpen} onClose={()=>setCartOpen(false)} />
-    <AuthModal open={modalOpen} type={modalType} onClose={(user)=>{
+  {/* Hide message bubble on admin pages */}
+  {(!user || user.role !== 'admin') && <QuickMessagesButton />}
+  <AuthModal open={modalOpen} type={modalType} onClose={(user)=>{
       setModalOpen(false);
       // If user is admin, redirect to /admin
       if(user && user.role === 'admin') {
@@ -143,28 +156,7 @@ export default function Navbar(){
         navigate('/admin');
       }
     }} />
-    {/* Floating message icon bottom right */}
-  <Link to="/messages" className="fixed bottom-6 right-6 z-50" onClick={handleMessagesClick}>
-      <div className="bg-teal-600 rounded-full shadow-lg w-16 h-16 flex items-center justify-center hover:bg-teal-700 transition-all relative">
-        <svg className="w-8 h-8 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M80-80v-740q0-24 18-42t42-18h680q24 0 42 18t18 42v520q0 24-18 42t-42 18H240L80-80Zm134-220h606v-520H140v600l74-80Zm-74 0v-520 520Z"/></svg>
-        {(() => {
-          try{
-            const me = JSON.parse(localStorage.getItem('user') || 'null')
-            if(!me) return null
-            let unread = 0
-            Object.keys(localStorage).forEach(k=>{
-              if(!k.startsWith('conv_meta_')) return
-              try{
-                const meta = JSON.parse(localStorage.getItem(k) || 'null')
-                if(meta && meta.unreadFor && meta.unreadFor.includes(me.id)) unread += 1
-              }catch(e){}
-            })
-            return unread > 0 ? <span className="absolute top-2 right-2 inline-flex items-center justify-center w-5 h-5 text-xs bg-red-600 text-white rounded-full">{unread}</span> : null
-          }catch(e){ return null }
-        })()}
-      </div>
-    </Link>
-    <CartModal open={cartOpen} onClose={()=>setCartOpen(false)} />
+      {/* Removed notification and points from sidebar as requested */}
     </>
   )
 }

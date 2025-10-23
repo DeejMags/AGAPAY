@@ -5,7 +5,7 @@ export default function About() {
   return (
     <section
       id="about"
-      className="py-10 md:py-16 px-2 sm:px-4 bg-gray-50 text-center flex flex-col items-center"
+      className="py-10 md:py-16 px-2 sm:px-4 text-center flex flex-col items-center bg-transparent"
     >
       <h2
         className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-teal-500 mb-4 flex items-center justify-center gap-2 mt-20"

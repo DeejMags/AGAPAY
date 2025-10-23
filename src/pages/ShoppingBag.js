@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { useCart } from '../components/CartContext';
-import { Link } from 'react-router-dom';
+import agapayLogo from '../components/imgs/agapay-logo.svg';
+// ...existing code...
 
 export default function ShoppingBag() {
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
   const { cart, setCart } = useCart();
   // Group items by _id and count quantity
   function getGrouped(cartArr) {
@@ -13,7 +15,7 @@ export default function ShoppingBag() {
       return acc;
     }, {}));
   }
-  const items = getGrouped(cart);
+  const items = React.useMemo(() => getGrouped(cart), [cart]);
 
   // Selection state for each item
   const [selected, setSelected] = useState(() => {
@@ -33,9 +35,15 @@ export default function ShoppingBag() {
       Object.keys(obj).forEach(id => {
         if (!items.find(i => i._id === id)) delete obj[id];
       });
+      // Avoid triggering state update if nothing changed
+      const prevKeys = Object.keys(prev);
+      const newKeys = Object.keys(obj);
+      if (prevKeys.length === newKeys.length && newKeys.every(k => prev[k] === obj[k])) {
+        return prev;
+      }
       return obj;
     });
-  }, [items.length]);
+  }, [items]);
 
   function updateQuantity(id, qty) {
     if (qty < 1) return;
@@ -99,7 +107,7 @@ export default function ShoppingBag() {
                     </td>
                     <td className="p-3 align-middle">
                       <div className="flex items-center gap-3">
-                        <img src={item.photo || '/assets/AGAPAY logo.png'} alt={item.title} className="w-16 h-16 object-cover rounded border" />
+                        <img src={item.photo || agapayLogo} alt={item.title} className="w-12 h-12 sm:w-16 sm:h-16 object-cover rounded border" />
                         <div className="flex flex-col justify-center">
                           <span className="font-semibold text-base leading-tight">{item.title}</span>
                           <span className="text-xs text-gray-500 leading-tight">{item.desc}</span>
@@ -124,7 +132,21 @@ export default function ShoppingBag() {
             </table>
             <div className="flex flex-col sm:flex-row justify-between items-center mt-2 mb-1 gap-2 border-t pt-4 px-4">
               <div className="font-bold text-lg">Total: ₱{total}</div>
-              <Link to={selectedItems.length > 0 ? "/checkout" : "#"} className={`px-4 py-2 bg-teal-600 text-white rounded shadow min-w-[180px] text-center ${selectedItems.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}>Proceed to Checkout</Link>
+              <button
+                className={`px-4 py-2 bg-teal-600 text-white rounded shadow min-w-[180px] text-center ${selectedItems.length === 0 || !user ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={selectedItems.length === 0 || !user}
+                onClick={() => {
+                  if (!user) {
+                    alert('Please log in to proceed to checkout.');
+                    return;
+                  }
+                  if (selectedItems.length > 0) {
+                    window.location.href = '/checkout';
+                  }
+                }}
+              >
+                Proceed to Checkout
+              </button>
             </div>
           </div>
         )}

@@ -1,13 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import FullScreenLoader from '../components/FullScreenLoader'
+// ...existing code...
 import { useLocation } from 'react-router-dom'
 import ProductCard from '../components/ProductCard'
-import SearchIcon from '../components/SearchIcon'
+import { db } from '../firebase'
+import { collection, getDocs } from 'firebase/firestore'
+// ...existing code...
 
 export default function Marketplace(){
-  const [loading, setLoading] = useState(false)
-  const navigate = useNavigate()
   const locationHook = useLocation();
   const params = new URLSearchParams(locationHook.search);
   const searchQuery = params.get('search') || '';
@@ -15,7 +14,7 @@ export default function Marketplace(){
   // main filter state
   // Remove local search state, use query from URL
   const [category, setCategory] = useState('')
-  const [location, setLocation] = useState('')
+  // const [location, setLocation] = useState('')
   const [minPrice, setMinPrice] = useState('')
   const [maxPrice, setMaxPrice] = useState('')
   const [sortBy, setSortBy] = useState('newest')
@@ -25,16 +24,45 @@ export default function Marketplace(){
   const [sidebarMaxPrice, setSidebarMaxPrice] = useState('')
   const [sidebarRating, setSidebarRating] = useState('')
 
-  useEffect(()=>{
-    const stored = JSON.parse(localStorage.getItem('agapay_products') || '[]')
-    setProducts(stored)
-  },[])
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchProducts() {
+      try {
+        // Prefer backend API which normalizes fields
+  const res = await fetch('/api/products');
+  if (!res.ok) throw new Error('API error');
+  const json = await res.json();
+  const items = Array.isArray(json) ? json : (json.items || []);
+  if (!cancelled) setProducts(items);
+      } catch (err) {
+        // If backend fails, fall back to client Firestore only (no localStorage demo)
+        try {
+          const snap = await getDocs(collection(db, 'products'));
+          const firebaseProducts = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          if (!cancelled) setProducts(firebaseProducts);
+        } catch (e) {
+          console.warn('Failed to load products from backend and Firestore', e);
+          if (!cancelled) setProducts([]);
+        }
+      }
+    }
+    fetchProducts();
+    const onProductUpdated = () => { fetchProducts(); };
+    window.addEventListener('product-updated', onProductUpdated);
+    return () => { cancelled = true; window.removeEventListener('product-updated', onProductUpdated); };
+  }, []);
 
   const filtered = useMemo(()=>{
     let res = products.filter(p=>{
-      if(searchQuery && !p.title.toLowerCase().includes(searchQuery.toLowerCase()) && !(p.desc||'').toLowerCase().includes(searchQuery.toLowerCase())) return false
+      if(p.status && p.status !== 'active') return false;
+      if (searchQuery) {
+        const tq = searchQuery.toLowerCase();
+        const titleOk = (p.title || '').toLowerCase().includes(tq);
+        const descOk = (p.description || '').toLowerCase().includes(tq);
+        if (!titleOk && !descOk) return false;
+      }
       if(category && p.category !== category) return false
-      if(location && !((p.location || '').toString().toLowerCase().includes(location.toString().toLowerCase().trim()))) return false
+  // ...existing code...
       if(minPrice && Number(p.price) < Number(minPrice)) return false
       if(maxPrice && Number(p.price) > Number(maxPrice)) return false
       return true
@@ -43,12 +71,21 @@ export default function Marketplace(){
     if(sortBy === 'low') res = res.sort((a,b)=>Number(a.price)-Number(b.price))
     if(sortBy === 'high') res = res.sort((a,b)=>Number(b.price)-Number(a.price))
     if(sortBy === 'alpha') res = res.sort((a,b)=> (a.title||'').toString().toLowerCase().localeCompare((b.title||'').toString().toLowerCase()))
-    if(sortBy === 'newest') res = res.sort((a,b)=> (b._id||'').localeCompare(a._id||'') )
+    if(sortBy === 'newest') {
+      res = res.sort((a,b)=> {
+        const aid = a._id || a.id;
+        const bid = b._id || b.id;
+        // If both are numbers, sort numerically (descending)
+        if (typeof bid === 'number' && typeof aid === 'number') return bid - aid;
+        // Otherwise, sort as strings (descending)
+        return String(bid).localeCompare(String(aid));
+      });
+    }
 
     return res
-  },[products, searchQuery, category, location, minPrice, maxPrice, sortBy])
+  },[products, searchQuery, category, minPrice, maxPrice, sortBy])
 
-  if(loading) return <FullScreenLoader />
+  // ...existing code...
 
   return (
     <div className="py-8">
@@ -115,7 +152,7 @@ export default function Marketplace(){
             </div>
             <h2 className="mt-2 text-xl font-semibold">All listings</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-4">
-              {filtered.map((i, idx)=> <ProductCard key={i._id} product={i} index={idx} style={{ ['--delay']: `${idx * 60}ms` }} />)}
+              {filtered.map((i, idx)=> <ProductCard key={i._id || i.id} product={i} index={idx} style={{ '--delay': `${idx * 60}ms` }} />)}
             </div>
           </div>
         </div>

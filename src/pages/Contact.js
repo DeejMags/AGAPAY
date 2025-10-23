@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import emailjs from "emailjs-com";
-import agapayLogo from "../components/imgs/agapay-logo.svg";
 
 export default function Contact() {
   const [form, setForm] = useState({ name: "", email: "", subject: "", message: "" });
@@ -42,7 +41,7 @@ export default function Contact() {
       <div className="w-full max-w-2xl mx-auto bg-white rounded-3xl shadow-xl flex flex-col items-start justify-center overflow-hidden my-12 gap-6 p-8 sm:p-12">
         <div className="flex flex-col items-start w-full text-left mb-8">
           <div className="flex items-center gap-3 mb-4">
-            <img src={agapayLogo} alt="Agapay Logo" className="w-10 h-10 object-contain" />
+            <img src='/assets/agapay-logo.png' alt="Agapay Logo" className="w-10 h-10 object-contain" />
             <span className="text-2xl font-extrabold text-teal-500">Agapay</span>
           </div>
           <h1 className="text-2xl font-extrabold text-gray-900 mb-2">Contact Us</h1>
