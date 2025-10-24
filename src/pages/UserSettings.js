@@ -344,7 +344,7 @@ export default function UserSettings() {
       </div>
       <div className="bg-white rounded-xl shadow p-6 mb-8">
         <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-\          Privacy & Security
+        Privacy & Security
         </h2>
         <button
           className="px-4 py-2 bg-red-600 text-white rounded"
