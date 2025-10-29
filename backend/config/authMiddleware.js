@@ -22,17 +22,25 @@ async function authMiddleware(req, res, next) {
     // Verify Firebase ID token
     const decoded = await admin.auth().verifyIdToken(token);
 
-    // Try to load user profile from Firestore (optional)
+    // Start with decoded token so custom claims are preserved
+    let merged = { ...decoded, uid: decoded.uid, email: decoded.email };
+
+    // Try to load user profile from Firestore (optional) and merge on top
     const userDoc = await db.collection('users').doc(decoded.uid).get();
     if (userDoc.exists) {
       const user = userDoc.data();
       delete user.password;
-      req.user = { uid: decoded.uid, id: userDoc.id, ...user };
-    } else {
-      // If no profile exists in Firestore, attach the decoded token info
-      req.user = { uid: decoded.uid, email: decoded.email, ...decoded };
+      merged = { ...merged, id: userDoc.id, ...user };
     }
 
+    // Normalize customClaims property for downstream checks
+    merged.customClaims = {
+      role: decoded.role,
+      isAdmin: decoded.isAdmin,
+      admin: decoded.admin,
+    };
+
+    req.user = merged;
     next();
   } catch (err) {
     console.error('Auth error:', err);

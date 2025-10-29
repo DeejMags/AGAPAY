@@ -201,3 +201,57 @@ exports.deactivateSelf = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+// Admin: ban a user by Firestore doc id, Firebase auth uid, or email
+// - Disables Firebase Auth sign-in for the user (updateUser({ disabled: true }) + revoke tokens)
+// - Marks Firestore profile as { status: 'banned', banned: true, bannedAt, banReason }
+exports.banUser = async (req, res) => {
+  try {
+    const allowAll = process.env.REPORTS_DEV_ALLOW_ALL === 'true' || process.env.NODE_ENV !== 'production';
+    // Basic admin gating: allow non-admins only in dev
+    const isAdmin = !!(req.user && (req.user.isAdmin || req.user.admin || req.user.role === 'admin' || (req.user.roles || []).includes('admin') || (req.user.customClaims && (req.user.customClaims.isAdmin || req.user.customClaims.admin || req.user.customClaims.role === 'admin'))));
+    if (!isAdmin && !allowAll) return res.status(403).json({ error: 'forbidden' });
+
+    const id = String(req.params.id);
+    const reason = (req.body && (req.body.reason || req.body.details)) || null;
+
+    // Resolve user: try by doc id, uid, email, or authId
+    let docRef = db.collection('users').doc(id);
+    let doc = await docRef.get();
+    if (!doc.exists) {
+      // try authId == id
+      const byAuth = await db.collection('users').where('authId', '==', id).limit(1).get();
+      if (!byAuth.empty) { docRef = byAuth.docs[0].ref; doc = byAuth.docs[0]; }
+    }
+    if (!doc.exists && id.includes('@')) {
+      // try email == id
+      const byEmail = await db.collection('users').where('email', '==', id).limit(1).get();
+      if (!byEmail.empty) { docRef = byEmail.docs[0].ref; doc = byEmail.docs[0]; }
+    }
+    if (!doc.exists) return res.status(404).json({ error: 'user_not_found' });
+
+    const data = doc.data() || {};
+    const uid = data.authId || data.uid || data.userId || doc.id;
+
+    // Disable Firebase Auth (best-effort)
+    let disabledAuth = false;
+    try {
+      await admin.auth().updateUser(uid, { disabled: true });
+      try { await admin.auth().revokeRefreshTokens(uid); } catch (e) {}
+      disabledAuth = true;
+    } catch (e) {
+      console.warn('banUser: failed to disable auth user', uid, e && e.message);
+    }
+
+    // Update Firestore profile
+    const stamp = admin.firestore.FieldValue.serverTimestamp();
+    const payload = { status: 'banned', banned: true, bannedAt: stamp, updatedAt: stamp };
+    if (reason) payload.banReason = String(reason);
+    await docRef.set(payload, { merge: true });
+
+    res.json({ ok: true, userId: docRef.id, disabledAuth });
+  } catch (err) {
+    console.error('banUser error', err);
+    res.status(500).json({ error: err.message });
+  }
+};

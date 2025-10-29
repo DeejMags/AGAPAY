@@ -1,14 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useCart } from './CartContext';
 
 export default function ProductCard({ product, index }) {
   const navigate = useNavigate();
-  const user = JSON.parse(localStorage.getItem('user') || 'null');
   const primary = Array.isArray(product.photo) ? product.photo[0] : (product.photo || `https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=800&q=60`);
   const [loadingNav, setLoadingNav] = useState(false);
-  const { addToCart } = useCart();
-  const [adding, setAdding] = useState(false);
+  // Cart removed: primary action now just views the item
   // ...existing code...
   const [rating, setRating] = useState(0);
 
@@ -33,21 +30,13 @@ export default function ProductCard({ product, index }) {
       <div className="mt-2 text-xs text-gray-600">Location: {product.location || 'N/A'}</div>
       <div className="mt-2 text-xs text-blue-600 cursor-pointer" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate(`/profile/${product.sellerId}`) }}>View seller</div>
       <button
-        className="mt-3 w-full bg-teal-600 text-white py-2 rounded hover:bg-teal-700 transition font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+        className="mt-3 w-full bg-teal-600 text-white py-2 rounded hover:bg-teal-700 transition font-semibold"
         onClick={e => {
           e.preventDefault();
-          if (!user) {
-            alert('Please log in to add items to your bag.');
-            return;
-          }
-          if (adding) return;
-          setAdding(true);
-          addToCart(product, 1);
-          setTimeout(() => setAdding(false), 900);
+          navigate(`/product/${product._id || product.id}`);
         }}
-        disabled={!user}
       >
-        {adding ? 'Added ✓' : 'Add to Bag'}
+        View Item
       </button>
       {/* Rating UI only, no delivery button */}
       <div className="mt-2 flex items-center gap-1">

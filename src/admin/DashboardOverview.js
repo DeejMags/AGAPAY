@@ -1,14 +1,17 @@
 import React from 'react';
-export default function DashboardOverview({ users, products, orders, messages, points }) {
+export default function DashboardOverview({ users, products, orders, reports, points }) {
   // normalize inputs: they can be arrays or paged responses { items: [] }
   const usersArr = users ? (Array.isArray(users) ? users : (users.items || [])) : [];
   const productsArr = products ? (Array.isArray(products) ? products : (products.items || [])) : [];
-  const messagesArr = messages ? (Array.isArray(messages) ? messages : (messages.items || [])) : [];
+  const reportsArr = reports ? (Array.isArray(reports) ? reports : (reports.items || [])) : [];
+
+  // Count unresolved reports (status not 'resolved'); default status is 'open'
+  const unresolvedReports = reportsArr.filter(r => (r.status || 'open') !== 'resolved').length;
 
   const stats = [
     { label: 'Total Users', value: usersArr.length },
     { label: 'Total Products', value: productsArr.length },
-    { label: 'Unread Messages', value: messagesArr.filter(m => m.unread || m.status === 'Flagged').length },
+    { label: 'Report', value: unresolvedReports },
     
   ];
   return (

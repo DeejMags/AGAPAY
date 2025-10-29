@@ -16,16 +16,16 @@ export default function ListingsPanel({ listings, onEdit, onDelete, onView, onSt
             </div>
             <div className="text-sm text-gray-700 mb-3 line-clamp-2">{item.description}</div>
             <div className="mt-auto flex flex-col gap-2 w-full">
-              {/* Top row: View / Edit / Delete */}
+
               <div className="flex items-center gap-2">
                 <button disabled={disabled} className={`px-3 py-1.5 text-xs rounded text-white ${disabled ? 'bg-teal-300 cursor-not-allowed' : 'bg-teal-600 hover:bg-teal-700'}`} onClick={()=>!disabled && onView(item)}>View</button>
                 <button disabled={disabled} className={`px-3 py-1.5 text-xs rounded text-white ${disabled ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`} onClick={()=>!disabled && onEdit(item)}>Edit</button>
                 <button disabled={disabled} className={`px-3 py-1.5 text-xs rounded text-white ${disabled ? 'bg-red-300 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'}`} onClick={()=>!disabled && onDelete(id)}>Delete</button>
               </div>
-              {/* Bottom row: status controls */}
+
               {(() => {
                 const hasApproval = !!item.publishedAt || status === 'active';
-                // Only show status row if item has been approved at least once
+
                 if (!hasApproval) return null;
                 return (
                   <div className="flex items-center gap-2">

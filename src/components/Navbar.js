@@ -4,14 +4,10 @@ import FullScreenLoader from './FullScreenLoader';
 import { Link, useNavigate } from 'react-router-dom';
 import SearchIcon from './SearchIcon';
 import AuthModal from './AuthModal';
-import { useCart } from './CartContext';
-import CartModal from './CartModal';
 import QuickMessagesButton from './QuickMessagesButton';
 
 export default function Navbar(){
-  const { cart } = useCart();
   const [loading, setLoading] = useState(false);
-  const [cartOpen, setCartOpen] = useState(false);
   const [search, setSearch] = useState('')
   const navigate = useNavigate()
   const [modalOpen, setModalOpen] = useState(false)
@@ -41,14 +37,7 @@ export default function Navbar(){
     }, 700);
   }
 
-  function handleBagClick(e) {
-    e.preventDefault();
-    setLoading(true);
-    setTimeout(() => {
-      navigate('/shopping-bag');
-      setLoading(false);
-    }, 700);
-  }
+  // Shopping bag icon removed from navbar per request
 
   return (
     <>
@@ -82,14 +71,7 @@ export default function Navbar(){
                   <SearchIcon />
                 </span>
               </div>
-              <Link to="/shopping-bag" className="relative ml-3 cursor-pointer" aria-label="Shopping Bag" onClick={handleBagClick}>
-                <svg xmlns="http://www.w3.org/2000/svg" height="32" viewBox="0 -960 960 960" width="32" fill="#036c5f">
-                  <path d="M220-80q-24 0-42-18t-18-42v-520q0-24 18-42t42-18h110v-10q0-63 43.5-106.5T480-880q63 0 106.5 43.5T630-730v10h110q24 0 42 18t18 42v520q0 24-18 42t-42 18H220Zm0-60h520v-520H630v90q0 12.75-8.68 21.37-8.67 8.63-21.5 8.63-12.82 0-21.32-8.63-8.5-8.62-8.5-21.37v-90H390v90q0 12.75-8.68 21.37-8.67 8.63-21.5 8.63-12.82 0-21.32-8.63-8.5-8.62-8.5-21.37v-90H220v520Zm170-580h180v-10q0-38-26-64t-64-26q-38 0-64 26t-26 64v10ZM220-140v-520 520Z"/>
-                </svg>
-                {cart.length > 0 && (
-                  <span className="absolute -top-2 -right-2 inline-flex items-center justify-center w-5 h-5 text-xs bg-teal-600 text-white rounded-full">{cart.length}</span>
-                )}
-              </Link>
+              {/* Shopping bag icon removed */}
               {/* Bell / Notifications icon */}
               <button
                 onClick={(e)=>{ e.preventDefault(); navigate('/notifications'); }}
@@ -145,7 +127,6 @@ export default function Navbar(){
         </div>
       </div>
   </nav>
-  <CartModal open={cartOpen} onClose={()=>setCartOpen(false)} />
   {/* Hide message bubble on admin pages */}
   {(!user || user.role !== 'admin') && <QuickMessagesButton />}
   <AuthModal open={modalOpen} type={modalType} onClose={(user)=>{

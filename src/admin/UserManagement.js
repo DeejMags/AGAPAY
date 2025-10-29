@@ -101,11 +101,11 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
 
   async function handleBan(id) {
     try {
-      // Try backend API first
-      const res = await authFetch(`/api/users/${id}`, {
-        method: 'PUT',
+      // Preferred: backend ban endpoint disables Firebase Auth and sets Firestore flags
+      const res = await authFetch(`/api/users/${encodeURIComponent(id)}/ban`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'Banned' })
+        body: JSON.stringify({ reason: 'Banned by admin' })
       });
       if (!res.ok) throw new Error('Backend ban failed');
       // log admin action
@@ -115,16 +115,17 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
         await addDoc(collection(db, 'admin_logs'), { action: 'ban_user', targetId: id, adminId, timestamp: serverTimestamp(), success: true });
       } catch (e) { console.warn('Failed to write admin log for ban', e); }
     } catch (err) {
-      // Fallback to Firestore client
-      await updateDoc(doc(db, 'users', id), { status: 'Banned' });
+      // Fallback: mark Firestore profile as banned if backend is unavailable
+      await updateDoc(doc(db, 'users', id), { status: 'banned', banned: true, active: false });
       try {
         const adminUser = JSON.parse(localStorage.getItem('user') || 'null');
         const adminId = (adminUser && (adminUser.id || adminUser.authId)) || (auth && auth.currentUser && auth.currentUser.uid) || null;
-        await addDoc(collection(db, 'admin_logs'), { action: 'ban_user', targetId: id, adminId, timestamp: serverTimestamp(), success: true });
+        await addDoc(collection(db, 'admin_logs'), { action: 'ban_user', targetId: id, adminId, timestamp: serverTimestamp(), success: true, note: 'fallback' });
       } catch (e) { console.warn('Failed to write admin log for ban', e); }
     }
-    setUsers(prev => prev.map(u => u.id === id ? { ...u, status: 'Banned' } : u));
-    if (setParentUsers) setParentUsers(prev => prev.map(u => u.id === id ? { ...u, status: 'Banned' } : u));
+    const applyBanned = (u) => u.id === id ? { ...u, status: 'banned', banned: true, active: false } : u;
+    setUsers(prev => prev.map(applyBanned));
+    if (setParentUsers) setParentUsers(prev => prev.map(applyBanned));
     setNotifyText('User banned'); setNotifySuccess(true); setNotifyOpen(true);
   }
 
@@ -142,13 +143,7 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
     setConfirmOpen(true);
   }
 
-  async function confirmDelete() {
-    const id = confirmTarget;
-    setConfirmOpen(false);
-    setConfirmTarget(null);
-    if (!id) return;
-    await handleDelete(id);
-  }
+  // removed unused confirmDelete helper; onConfirm calls handleBan/handleDelete directly
 
 
 
@@ -212,19 +207,31 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
                   <td className="p-3 align-top">{u.phone || ''}</td>
                   <td className="p-3 align-top">
                     <div className="flex items-center gap-2 whitespace-nowrap">
-                      
-                      <button
-                        className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition"
-                        onClick={() => openBanConfirm(u.id)}
-                        aria-label={`Ban ${u.username || u.name}`}>
-                        Ban
-                      </button>
-                                      <button
-                                        className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition"
-                                        onClick={() => openDeleteConfirm(u.id)}
-                                        aria-label={`Delete ${u.username || u.name}`}>
-                                        Delete
-                                      </button>
+                      {(() => {
+                        const status = String(u.status || '').toLowerCase();
+                        const isBanned = u.banned === true || status === 'banned' || status.includes('ban') || (u.active === false && status !== 'active');
+                        if (isBanned) {
+                          return (
+                            <span className="px-2 py-1 rounded bg-red-100 text-red-700 font-medium">Banned</span>
+                          );
+                        }
+                        return (
+                          <>
+                            <button
+                              className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition"
+                              onClick={() => openBanConfirm(u.id)}
+                              aria-label={`Ban ${u.username || u.name}`}>
+                              Ban
+                            </button>
+                            <button
+                              className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition"
+                              onClick={() => openDeleteConfirm(u.id)}
+                              aria-label={`Delete ${u.username || u.name}`}>
+                              Delete
+                            </button>
+                          </>
+                        );
+                      })()}
                     </div>
                   </td>
                 </tr>

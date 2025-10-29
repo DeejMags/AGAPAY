@@ -17,6 +17,7 @@ const { admin, db } = require('./config/firebaseAdmin'); // Initialize Firebase 
 const authRoutes = require('./routes/authRoutes')
 const productRoutes = require('./routes/productRoutes')
 const userRoutes = require('./routes/userRoutes')
+const reportRoutes = require('./routes/reportRoutes')
 const debugRoutes = require('./routes/debugRoutes')
 let messageRoutes = null
 
@@ -29,6 +30,7 @@ app.use('/uploads', express.static('uploads'))
 
 app.use('/api/auth', authRoutes)
 app.use('/api/products', productRoutes)
+app.use('/api/reports', reportRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/debug', debugRoutes)
 

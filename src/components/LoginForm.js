@@ -30,6 +30,15 @@ function mapAuthError(err) {
 }
 
 export default function LoginForm({ onSuccess }){
+  const [bannedOpen, setBannedOpen] = useState(false);
+  const [bannedMsg, setBannedMsg] = useState('Your account has been banned for violating our policies. If you believe this is a mistake, please contact support.');
+
+  function openBannedModal(message, reason) {
+    const base = message || 'Your account has been banned for violating our policies. If you believe this is a mistake, please contact support.';
+    const full = reason ? `${base}\n\nReason: ${reason}` : base;
+    setBannedMsg(full);
+    setBannedOpen(true);
+  }
   // Google Login handler
   async function handleGoogleLogin(e) {
     e.preventDefault();
@@ -43,6 +52,15 @@ export default function LoginForm({ onSuccess }){
         const r = await fetch('/api/auth/google', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: user.email, name: user.displayName, uid: user.uid }) });
         if (!r.ok) throw new Error('Failed to fetch/create profile');
         const profile = await r.json();
+        // Banned guard from backend profile
+        const pStatus = String(profile.status || '').toLowerCase();
+        const pBanned = profile.banned === true || pStatus === 'banned' || pStatus.includes('ban') || (profile.active === false && pStatus !== 'active');
+        if (pBanned) {
+          try { await auth.signOut(); } catch {}
+          try { localStorage.removeItem('user'); localStorage.removeItem('token'); } catch {}
+          openBannedModal('Your account is banned and cannot log in.', profile.banReason || profile.reason);
+          return;
+        }
         const isAdmin = user.email === 'admin@agapay.com' || user.email === 'admin@gmail.com';
         const finalProfile = { id: profile.id || user.uid, username: profile.username || user.displayName, email: user.email, role: isAdmin ? 'admin' : profile.role || 'user' };
         localStorage.setItem('user', JSON.stringify(finalProfile));
@@ -55,7 +73,11 @@ export default function LoginForm({ onSuccess }){
         return;
       }
     } catch (err) {
-      setError(mapAuthError(err));
+      if (err && err.code === 'auth/user-disabled') {
+        openBannedModal('Your account is banned and cannot log in.');
+      } else {
+        setError(mapAuthError(err));
+      }
     }
   }
   const [email,setEmail] = useState('')
@@ -88,6 +110,15 @@ export default function LoginForm({ onSuccess }){
           return;
         }
         const profile = await r.json();
+        // Banned guard from backend profile
+        const pStatus = String(profile.status || '').toLowerCase();
+        const pBanned = profile.banned === true || pStatus === 'banned' || pStatus.includes('ban') || (profile.active === false && pStatus !== 'active');
+        if (pBanned) {
+          try { await auth.signOut(); } catch {}
+          try { localStorage.removeItem('user'); localStorage.removeItem('token'); } catch {}
+          openBannedModal('Your account is banned and cannot log in.', profile.banReason || profile.reason);
+          return;
+        }
         localStorage.setItem('token', user.uid);
         localStorage.setItem('user', JSON.stringify(profile));
         if (profile.role === 'admin' || profile.email === 'admin@agapay.com' || profile.email === 'admin@gmail.com') {
@@ -99,11 +130,16 @@ export default function LoginForm({ onSuccess }){
         return;
       }
     } catch (err) {
-      setError(mapAuthError(err));
+      if (err && err.code === 'auth/user-disabled') {
+        openBannedModal('Your account is banned and cannot log in.');
+      } else {
+        setError(mapAuthError(err));
+      }
     }
   }
 
   return (
+    <>
     <form onSubmit={submit} className="flex flex-col gap-3">
       {error && (
         <div className="rounded-md bg-red-50 border border-red-200 text-red-700 px-3 py-2 text-sm">
@@ -119,6 +155,20 @@ export default function LoginForm({ onSuccess }){
         Login with Google
       </button>
     </form>
+
+    {/* Banned popup */}
+    {bannedOpen && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-5">
+          <div className="text-lg font-semibold mb-2">Account Banned</div>
+          <div className="text-sm text-gray-700 whitespace-pre-line">{bannedMsg}</div>
+          <div className="flex justify-end gap-2 mt-4">
+            <button className="px-4 py-2 rounded bg-teal-600 text-white" onClick={()=> setBannedOpen(false)}>OK</button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
 }
 

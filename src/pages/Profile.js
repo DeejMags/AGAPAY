@@ -1,20 +1,31 @@
-import React, { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import React, { useEffect, useRef, useState } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import RatingStars from '../components/RatingStars'
 import ProductCard from '../components/ProductCard'
 import authFetch from '../utils/authFetch'
 import FullScreenLoader from '../components/FullScreenLoader'
+import ReportModal from '../components/ReportModal'
 
 export default function Profile(){
   // ...existing code...
   // (Ensure all code for Profile component is above this bracket)
 // ...existing code...
 
-function ProfileHeader({ me, onPicChange }) {
+function ProfileHeader({ me, onPicChange, menu }) {
   return (
-    <div className="bg-white border rounded p-4 flex flex-col items-center">
-      <div className="w-40 h-40 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
-        {me && me.profilePic ? <img src={me.profilePic} alt="profile" className="w-full h-full object-cover" /> : <div className="text-gray-500">No photo</div>}
+    <div className="relative bg-white border rounded p-4 flex flex-col items-center">
+      {/* Three-dots actions outside the portrait, top-right of the card */}
+      {menu ? (
+        <div className="absolute top-2 right-2 z-30">
+          {menu}
+        </div>
+      ) : null}
+      <div className="relative w-40 h-40 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
+        {me && me.profilePic ? (
+          <img src={me.profilePic} alt="profile" className="w-full h-full object-cover" />
+        ) : (
+          <div className="text-gray-500">No photo</div>
+        )}
       </div>
       <h2 className="mt-4 text-xl font-semibold">{me ? (me.name || me.username) : 'User'}</h2>
       <div className="text-sm text-gray-600">{me ? me.email : ''}</div>
@@ -24,9 +35,23 @@ function ProfileHeader({ me, onPicChange }) {
   );
 }
   const { id } = useParams()
+  const navigate = useNavigate()
   const [user, setUser] = useState(null)
   const [myProducts, setMyProducts] = useState([])
   const [loading, setLoading] = useState(true)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [showReport, setShowReport] = useState(false)
+  const menuRef = useRef(null)
+
+  // close menu on outside click
+  useEffect(() => {
+    function onDocMouseDown(e){
+      // Close only if click is outside the menu wrapper
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onDocMouseDown);
+    return ()=> document.removeEventListener('mousedown', onDocMouseDown);
+  }, [])
 
   useEffect(() => {
     async function fetchUserByParam(paramId) {
@@ -137,12 +162,35 @@ function ProfileHeader({ me, onPicChange }) {
   if (loading) return <FullScreenLoader />
   if(!user) return <div className="py-8 container mx-auto px-4">User not found.</div>
 
+  // Menu element (three dots) shown only when viewing another user's profile
+  const menu = id ? (
+    <div ref={menuRef} className="relative" onMouseDown={(e)=>e.stopPropagation()}>
+      <button
+        type="button"
+        className="w-9 h-9 flex items-center justify-center bg-white/90 hover:bg-white border border-gray-300 text-gray-800 shadow-sm text-xl"
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        title="More actions"
+        onClick={() => setMenuOpen(v => !v)}
+      >
+        <span aria-hidden>⋮</span>
+      </button>
+      {menuOpen && (
+        <div role="menu" className="absolute right-0 mt-2 w-44 bg-white border rounded-lg shadow-lg z-50">
+          <button role="menuitem" className="w-full text-left px-3 py-2 hover:bg-gray-50" onClick={() => { setMenuOpen(false); navigate('/reviews'); }}>Review seller</button>
+          <button role="menuitem" className="w-full text-left px-3 py-2 hover:bg-gray-50 text-red-600" onClick={() => { setMenuOpen(false); setShowReport(true); }}>Report seller</button>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div className="py-8 container mx-auto px-4">
       <div className="flex flex-col md:flex-row gap-6">
         <div className="w-full md:w-1/4">
           {/* Profile header: circular image with edit overlay */}
-          <ProfileHeader me={user} onPicChange={(u)=>{ setUser(u); }} />
+          <ProfileHeader me={user} onPicChange={(u)=>{ setUser(u); }} menu={menu} />
 
           {/* View / Edit area under header */}
           <div className="mt-4">
@@ -163,8 +211,9 @@ function ProfileHeader({ me, onPicChange }) {
           </div>
         </div>
       </div>
+      {/* Report modal */}
+      <ReportModal open={showReport} onClose={()=>setShowReport(false)} reportedUser={user} onSubmitted={()=>{ /* could toast */ }} />
     </div>
   )
 
-  // ...existing code...
 }

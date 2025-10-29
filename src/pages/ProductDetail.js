@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react'
-import { useCart } from '../components/CartContext';
 import FullScreenLoader from '../components/FullScreenLoader'
 import { useParams, useNavigate } from 'react-router-dom'
 import RatingStars from '../components/RatingStars'
@@ -7,8 +6,6 @@ import ProductCard from "../components/ProductCard";
 
 export default function ProductDetail(){
   const { id } = useParams()
-  const { addToCart } = useCart();
-  const [adding, setAdding] = useState(false)
   const [product, setProduct] = useState(null)
   const [seller, setSeller] = useState(null)
   // ...existing code...
@@ -130,9 +127,8 @@ export default function ProductDetail(){
   function openChat(){
     (async () => {
       try {
-        const { auth } = await import('../firebase');
-        const me = JSON.parse(localStorage.getItem('user') || 'null');
-        const myId = (auth && auth.currentUser && auth.currentUser.uid) || (me && me.id) || 'anon';
+  const { auth } = await import('../firebase');
+  const me = JSON.parse(localStorage.getItem('user') || 'null');
         const productId = product ? (product._id || product.id) : null;
         const otherId = (seller && seller.id) ? seller.id : (productId ? `seller_${productId}` : 'unknown');
         const svc = await import('../firebaseMessageService');
@@ -156,7 +152,7 @@ export default function ProductDetail(){
 
   return (
     <div className="py-8 container mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div className="md:col-span-2">
+  <div className="md:col-span-2">
         <div className="bg-gray-100 rounded overflow-hidden">
           {images.length > 1 ? (
             <div className="relative">
@@ -185,15 +181,7 @@ export default function ProductDetail(){
               <div className="text-xs text-gray-500">{seller ? seller.email : ''}</div>
             </div>
           </div>
-          <button
-            className="mt-3 w-full p-2 bg-teal-600 text-white rounded shadow hover:bg-teal-700 transition"
-            onClick={()=>{
-              if (adding) return;
-              setAdding(true);
-              addToCart(product, 1);
-              setTimeout(()=>setAdding(false), 900);
-            }}
-          >{adding ? 'Added ✓' : 'Add to Bag'}</button>
+          {/* View Item removed on Product page as requested */}
           <button onClick={openChat} className="mt-3 w-full p-2 bg-teal-600 text-white rounded">Message Seller</button>
           <button
             onClick={() => {

@@ -9,7 +9,6 @@ import Messages from './pages/Messages'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
 import NotFound from './pages/NotFound'
-import ShoppingBag from './pages/ShoppingBag'
 import UploadProduct from './pages/UploadProduct'
 import ProtectedRoute from './components/ProtectedRoute'
 import Footer from './components/Footer'
@@ -38,7 +37,7 @@ function App(){
             <Route path="/login" element={<Login/>} />
             <Route path="/signup" element={<Signup/>} />
             <Route path="/admin" element={<AdminDashboard/>} />
-            <Route path="/shopping-bag" element={<ShoppingBag/>} />
+            {/* Shopping bag removed */}
             <Route path="/listings" element={<ProtectedRoute><Listings/></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><SellerDashboard/></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><UserSettings/></ProtectedRoute>} />

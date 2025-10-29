@@ -5,6 +5,7 @@ import UserManagement from './UserManagement';
 import ProductManagement from './ProductManagement';
 import OrdersManagement from './OrdersManagement';
 import Report from './Report';
+import authFetch from '../utils/authFetch';
 import PointsRewards from './PointsRewards';
 import Notifications from './Notifications';
 import Settings from './Settings';
@@ -15,7 +16,6 @@ import { collection, getDocs } from 'firebase/firestore';
 // Dashboard state initial values (no demo data)
 const initialUsers = [];
 const initialOrders = [];
-const initialMessages = [];
 const initialNotifications = [];
 const initialPoints = [];
 
@@ -80,21 +80,57 @@ export default function AdminDashboard() {
     loadUsers();
   }, []);
   const [orders, setOrders] = useState(initialOrders);
-  const [messages, setMessages] = useState(initialMessages);
-  // 'report' replaces the previous 'message' naming; keep both name and setter for clarity
-  const [report, setReport] = useState(null);
+  const [reportItems, setReportItems] = useState([]);
   const [notifications, setNotifications] = useState(initialNotifications);
   const [points, setPoints] = useState(initialPoints);
 
-  // Calculate unread/flagged messages for Sidebar badge
-  const unreadMessages = messages.filter(m => m.unread || m.status === 'Flagged').length;
+  // Load reports for sidebar badge (count open/in_review)
+  const loadReports = React.useCallback(async () => {
+    try {
+      const res = await authFetch('/api/reports');
+      if (res.ok) {
+        const json = await res.json();
+        const arr = Array.isArray(json) ? json : (json.items || []);
+        setReportItems(arr);
+      } else {
+        setReportItems([]);
+      }
+    } catch {
+      setReportItems([]);
+    }
+  }, []);
+
+  // Initial load
+  React.useEffect(() => { loadReports(); }, [loadReports]);
+
+  // Refresh when returning to dashboard/report, or when tab visibility changes
+  React.useEffect(() => {
+    if (activePage === 'dashboard' || activePage === 'report') {
+      loadReports();
+    }
+  }, [activePage, loadReports]);
+
+  React.useEffect(() => {
+    const onVis = () => { if (document.visibilityState === 'visible') loadReports(); };
+    const onChanged = () => loadReports();
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('reports-changed', onChanged);
+    // light polling as a fallback every 45s
+    const id = window.setInterval(loadReports, 45000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('reports-changed', onChanged);
+      window.clearInterval(id);
+    };
+  }, [loadReports]);
+
 
 
   // Main render logic
   function renderPage() {
     switch (activePage) {
       case 'dashboard':
-        return <DashboardOverview users={users} products={products} orders={orders} messages={messages} points={points} />;
+        return <DashboardOverview users={users} products={products} orders={orders} reports={reportItems} points={points} />;
       case 'users':
         return <UserManagement users={users} setUsers={setUsers} />;
       case 'products':
@@ -102,8 +138,7 @@ export default function AdminDashboard() {
       case 'orders':
         return <OrdersManagement orders={orders} setOrders={setOrders} />;
       case 'report':
-        // Sidebar uses 'report' as the key. Render the Report component with messages data
-        return <Report messages={messages} setMessages={setMessages} />;
+        return <Report />;
       case 'points':
         return <PointsRewards points={points} setPoints={setPoints} />;
       case 'notifications':
@@ -111,14 +146,14 @@ export default function AdminDashboard() {
       case 'settings':
         return <Settings />;
       default:
-        return <DashboardOverview users={users} products={products} orders={orders} messages={messages} points={points} report={report} setReport={setReport} />;
+        return <DashboardOverview users={users} products={products} orders={orders} reports={reportItems} points={points} />;
     }
   }
 
   // Responsive layout
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-teal-100 via-white to-gray-100 ml-[-12px] sm:ml-[-16px]">
-      <Sidebar activePage={activePage} setActivePage={setActivePage} unreadMessages={unreadMessages} />
+  <Sidebar activePage={activePage} setActivePage={setActivePage} />
       <div className="flex-1 flex flex-col">
         {/* Tighter paddings to remove excessive gaps */}
         <main className="flex-1 p-3 sm:p-4 md:p-6">

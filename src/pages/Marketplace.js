@@ -6,6 +6,23 @@ import { db } from '../firebase'
 import { collection, getDocs } from 'firebase/firestore'
 // ...existing code...
 
+// Stable helpers for category filtering
+const KNOWN_CATEGORIES = ['electronics','fashion','home & living','furniture','home','sports','services'];
+const normalize = (s) => String(s || '').trim().toLowerCase();
+const mapSearchToCategory = (q) => {
+  const t = normalize(q);
+  if (!t) return '';
+  if (/(^|\b)(electronic|electronics)(\b|$)/.test(t)) return 'electronics';
+  if (/(^|\b)(fashion|clothes|clothing|apparel)(\b|$)/.test(t)) return 'fashion';
+  if (/(^|\b)(home\s*&\s*living|home and living)(\b|$)/.test(t)) return 'home & living';
+  if (/(^|\b)(furniture)(\b|$)/.test(t)) return 'furniture';
+  if (/(^|\b)(home)(\b|$)/.test(t)) return 'home';
+  if (/(^|\b)(sport|sports)(\b|$)/.test(t)) return 'sports';
+  if (/(^|\b)(service|services)(\b|$)/.test(t)) return 'services';
+  if (/(^|\b)(other|others|misc|miscellaneous)(\b|$)/.test(t)) return 'others';
+  return '';
+};
+
 export default function Marketplace(){
   const locationHook = useLocation();
   const params = new URLSearchParams(locationHook.search);
@@ -53,15 +70,24 @@ export default function Marketplace(){
   }, []);
 
   const filtered = useMemo(()=>{
+    const effectiveCategory = normalize(category) || mapSearchToCategory(searchQuery);
     let res = products.filter(p=>{
       if(p.status && p.status !== 'active') return false;
       if (searchQuery) {
         const tq = searchQuery.toLowerCase();
         const titleOk = (p.title || '').toLowerCase().includes(tq);
-        const descOk = (p.description || '').toLowerCase().includes(tq);
+        const descOk = (p.description || p.desc || '').toLowerCase().includes(tq);
         if (!titleOk && !descOk) return false;
       }
-      if(category && p.category !== category) return false
+      const pCat = normalize(p.category);
+      if (effectiveCategory) {
+        if (effectiveCategory === 'others') {
+          // Show items not in known categories when 'Others' is selected
+          if (!pCat || KNOWN_CATEGORIES.includes(pCat)) return false;
+        } else {
+          if (pCat !== effectiveCategory) return false;
+        }
+      }
   // ...existing code...
       if(minPrice && Number(p.price) < Number(minPrice)) return false
       if(maxPrice && Number(p.price) > Number(maxPrice)) return false
@@ -93,7 +119,7 @@ export default function Marketplace(){
         {/* categories pill bar */}
         <div className="overflow-auto py-2">
           <div className="flex gap-2">
-            {['All','electronics','fashion','furniture','home','sports','services'].map(cat => (
+            {['All','electronics','fashion','home & living','furniture','home','sports','services','others'].map(cat => (
               <button key={cat} onClick={()=> setCategory(cat==='All' ? '' : cat)} className={`px-3 py-1 rounded-full border ${category === (cat==='All' ? '' : cat) ? 'bg-teal-600 text-white' : 'bg-white text-gray-700'}`}>
                 {cat.charAt(0).toUpperCase() + cat.slice(1)}
               </button>
@@ -132,11 +158,13 @@ export default function Marketplace(){
                 <select className="w-full p-2 border rounded" value={category} onChange={e=>setCategory(e.target.value)}>
                   <option value="">All categories</option>
                   <option value="electronics">Electronics</option>
+                  <option value="home & living">Home & Living</option>
                   <option value="furniture">Furniture</option>
                   <option value="sports">Sports</option>
                   <option value="fashion">Fashion</option>
                   <option value="home">Home</option>
                   <option value="services">Services</option>
+                  <option value="others">Others</option>
                 </select>
               </div>
             </div>
