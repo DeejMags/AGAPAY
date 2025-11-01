@@ -5,8 +5,10 @@ import { auth } from '../firebase';
 export default function ImpactReportPanel() {
   const [loading, setLoading] = useState(true);
   const [sold, setSold] = useState(0);
+  const [points, setPoints] = useState(0);
   const [goals] = useState({ sold: 20, points: 2000 }); // add points goal for UI only
   const unsubRef = useRef(null);
+  const userUnsubRef = useRef(null);
 
   function pct(value, total) {
     if (!total || total <= 0) return 0;
@@ -36,6 +38,24 @@ export default function ImpactReportPanel() {
     }
   }, []);
 
+  // Realtime listener for user points
+  const attachUserPointsListener = useCallback(async function attachUserPointsListener() {
+    try {
+      const { db } = await import('../firebase');
+      const { doc, onSnapshot } = await import('firebase/firestore');
+      const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
+      if (!uid) return;
+      const ref = doc(db, 'users', uid);
+      const unsub = onSnapshot(ref, (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data() || {};
+        const total = Number(data.totalPoints || data.sellerPoints || 0) || 0;
+        setPoints(total);
+      }, (err) => { console.debug('ImpactReport user points realtime error', err && err.message); });
+      userUnsubRef.current = unsub;
+    } catch (e) { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -57,9 +77,21 @@ export default function ImpactReportPanel() {
           const mine = uid ? items.filter(p => p.sellerId === uid) : items;
           const soldCount = mine.filter(p => isSoldStatus(p.status)).length;
           if (!cancelled) { setSold(soldCount); }
+          // Load user points from backend
+          try {
+            if (uid) {
+              const ures = await authFetch(`/api/users/${uid}`);
+              if (ures && ures.ok) {
+                const u = await ures.json();
+                const total = Number(u.totalPoints || u.sellerPoints || 0) || 0;
+                if (!cancelled) setPoints(total);
+              }
+            }
+          } catch (e) { /* ignore */ }
           setLoading(false);
           // Also attach a realtime listener to Firestore for live updates
           attachRealtimeListener();
+          attachUserPointsListener();
           return;
         }
       } catch (e) {
@@ -67,7 +99,7 @@ export default function ImpactReportPanel() {
       }
 
       try {
-        const { collection, getDocs, query, where } = await import('firebase/firestore');
+        const { collection, getDocs, query, where, doc, getDoc } = await import('firebase/firestore');
         const { db } = await import('../firebase');
         const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
         if (!uid) { setSold(0); setLoading(false); return; }
@@ -76,8 +108,19 @@ export default function ImpactReportPanel() {
         const products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         const soldCount = products.filter(p => isSoldStatus(p.status)).length;
         if (!cancelled) { setSold(soldCount); }
+        // Load user points from Firestore
+        try {
+          const uref = doc(db, 'users', uid);
+          const usnap = await getDoc(uref);
+          if (usnap.exists()) {
+            const data = usnap.data() || {};
+            const total = Number(data.totalPoints || data.sellerPoints || 0) || 0;
+            if (!cancelled) setPoints(total);
+          }
+        } catch (e) { /* ignore */ }
         // Attach realtime listener
         attachRealtimeListener();
+        attachUserPointsListener();
       } catch (e) {
         if (!cancelled) { setSold(0); }
       } finally {
@@ -85,8 +128,12 @@ export default function ImpactReportPanel() {
       }
     }
     load();
-    return () => { cancelled = true; if (unsubRef.current) { try { unsubRef.current(); } catch(e) {} } };
-  }, [attachRealtimeListener]);
+    return () => {
+      cancelled = true;
+      if (unsubRef.current) { try { unsubRef.current(); } catch(e) {} }
+      if (userUnsubRef.current) { try { userUnsubRef.current(); } catch(e) {} }
+    };
+  }, [attachRealtimeListener, attachUserPointsListener]);
 
   function isSoldStatus(status) {
     if (!status) return false;
@@ -123,21 +170,21 @@ export default function ImpactReportPanel() {
             </div>
           </div>
         </div>
-        {/* Points (design only; no logic) */}
+        {/* Points */}
         <div className="relative overflow-hidden rounded-xl p-5 bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs uppercase tracking-wide text-emerald-600 font-medium">Points</div>
-              <div className="mt-1 text-3xl font-extrabold text-emerald-700">—</div>
+              <div className="mt-1 text-3xl font-extrabold text-emerald-700">{loading ? '—' : points.toLocaleString()}</div>
             </div>
             <div className="text-4xl">⭐</div>
           </div>
           <div className="mt-4">
             <div className="w-full bg-white/80 rounded-full h-2 overflow-hidden shadow-inner">
-              <div className="h-2 bg-emerald-500 transition-all" style={{ width: `0%` }} />
+              <div className="h-2 bg-emerald-500 transition-all" style={{ width: `${pct(points, goals.points)}%` }} />
             </div>
             <div className="mt-2 flex justify-between text-xs text-emerald-700/80">
-              <span>0% of goal</span>
+              <span>{pct(points, goals.points)}% of goal</span>
               <span>Goal: {goals.points.toLocaleString()}</span>
             </div>
           </div>

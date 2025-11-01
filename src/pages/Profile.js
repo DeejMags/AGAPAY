@@ -12,6 +12,7 @@ export default function Profile(){
 // ...existing code...
 
 function ProfileHeader({ me, onPicChange, menu }) {
+  const displayName = me ? (me.username || me.name || me.displayName || me.fullName || (me.email ? String(me.email).split('@')[0] : 'User')) : 'User';
   return (
     <div className="relative bg-white border rounded p-4 flex flex-col items-center">
       {/* Three-dots actions outside the portrait, top-right of the card */}
@@ -27,7 +28,7 @@ function ProfileHeader({ me, onPicChange, menu }) {
           <div className="text-gray-500">No photo</div>
         )}
       </div>
-      <h2 className="mt-4 text-xl font-semibold">{me ? (me.name || me.username) : 'User'}</h2>
+      <h2 className="mt-4 text-xl font-semibold">{displayName}</h2>
       <div className="text-sm text-gray-600">{me ? me.email : ''}</div>
       {me && me.phone && <div className="text-sm text-gray-600 mt-1">{me.phone}</div>}
       {me && me.location && <div className="text-sm text-gray-600 mt-1">{me.location}</div>}
@@ -42,6 +43,8 @@ function ProfileHeader({ me, onPicChange, menu }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [showReport, setShowReport] = useState(false)
   const menuRef = useRef(null)
+  // Trigger reload when auth state becomes available (fixes initial 'User' until refresh)
+  const [reloadTick, setReloadTick] = useState(0)
 
   // close menu on outside click
   useEffect(() => {
@@ -52,6 +55,19 @@ function ProfileHeader({ me, onPicChange, menu }) {
     document.addEventListener('mousedown', onDocMouseDown);
     return ()=> document.removeEventListener('mousedown', onDocMouseDown);
   }, [])
+
+  // When viewing own profile (no :id), wait for Firebase auth to initialize and then reload
+  useEffect(() => {
+    if (id) return; // only for self profile
+    let unsub = null;
+    (async () => {
+      try {
+        const { auth } = await import('../firebase');
+        unsub = auth.onAuthStateChanged(() => setReloadTick(t => t + 1));
+      } catch (e) { /* ignore */ }
+    })();
+    return () => { if (typeof unsub === 'function') unsub(); };
+  }, [id])
 
   useEffect(() => {
     async function fetchUserByParam(paramId) {
@@ -94,10 +110,15 @@ function ProfileHeader({ me, onPicChange, menu }) {
         if (uid) {
           const u = await fetchUserByParam(uid);
           if (u) return u;
+          // Build a minimal profile from auth if Firestore lookup failed
+          const baseName = email ? String(email).split('@')[0] : 'User';
+          return { id: uid, authId: uid, email: email || null, username: baseName, displayName: baseName };
         }
         if (email) {
           const u = await fetchUserByParam(email);
           if (u) return u;
+          const baseName = String(email).split('@')[0];
+          return { id: email, authId: null, email, username: baseName, displayName: baseName };
         }
       } catch (e) {
         // ignore
@@ -107,9 +128,48 @@ function ProfileHeader({ me, onPicChange, menu }) {
         const key = local.id || local.authId || local.email;
         const u = await fetchUserByParam(key);
         if (u) return u;
-        return local; // last resort
+        // Ensure local has a sensible display name fallback
+        const email = local.email || null;
+        const baseName = email ? String(email).split('@')[0] : (local.username || local.displayName || 'User');
+        return { ...local, username: local.username || baseName, displayName: local.displayName || baseName };
       }
       return null;
+    }
+
+    async function enrichProfile(u) {
+      if (!u) return null;
+      const hasName = !!(u.username || u.name || u.displayName || u.fullName);
+      const hasEmail = !!u.email;
+      if (hasName && hasEmail) return u;
+      // Try multiple keys: id, authId, email
+      const candidates = [u.id, u.authId, u.email].filter(Boolean).map(String);
+      for (const key of candidates) {
+        try {
+          const r = await authFetch(`/api/users/${encodeURIComponent(key)}`);
+          if (r && r.ok) {
+            const j = await r.json();
+            const merged = {
+              ...u,
+              username: u.username || j.username || j.displayName || undefined,
+              name: u.name || j.name || undefined,
+              displayName: u.displayName || j.displayName || j.username || undefined,
+              fullName: u.fullName || j.fullName || undefined,
+              email: u.email || j.email || undefined,
+              profilePic: u.profilePic || j.profilePic || j.photoURL || undefined,
+            };
+            return merged;
+          }
+        } catch (e) { /* continue */ }
+      }
+      // Firestore fallback by id
+      try {
+        const { db } = await import('../firebase');
+        const { doc, getDoc } = await import('firebase/firestore');
+        const ref = doc(db, 'users', String(u.id || ''));
+        const snap = await getDoc(ref);
+        if (snap.exists()) return { id: snap.id, ...snap.data(), ...u };
+      } catch (e) { /* ignore */ }
+      return u;
     }
 
     async function load() {
@@ -120,10 +180,16 @@ function ProfileHeader({ me, onPicChange, menu }) {
       else profile = await fetchCurrentUser();
       setUser(profile);
 
+      // Best-effort enrichment to populate missing name/email without requiring a manual refresh
+      try {
+        const improved = await enrichProfile(profile);
+        if (improved) setUser(improved);
+      } catch (e) { /* ignore */ }
+
       // 2) Load products (public API shows active by default)
       let products = [];
       try {
-        const res = await fetch('/api/products');
+        const res = await authFetch('/api/products');
         if (res.ok) {
           const json = await res.json();
           products = Array.isArray(json) ? json : (json.items || []);
@@ -157,7 +223,7 @@ function ProfileHeader({ me, onPicChange, menu }) {
       setLoading(false);
     }
     load();
-  }, [id]);
+  }, [id, reloadTick]);
 
   if (loading) return <FullScreenLoader />
   if(!user) return <div className="py-8 container mx-auto px-4">User not found.</div>
@@ -194,9 +260,7 @@ function ProfileHeader({ me, onPicChange, menu }) {
 
           {/* View / Edit area under header */}
           <div className="mt-4">
-            <h2 className="mt-2 text-xl font-semibold">{user.username}</h2>
-            <div className="text-sm text-gray-600">{user.email}</div>
-            {/* Only show rating stars if user is a seller (has listings) */}
+            {/* Only show rating stars if user is a seller (has listings); omit duplicate name/email below the profile card */}
             {myProducts.length > 0 && (
               <div className="mt-2">
                 <RatingStars value={(user.ratings||[]).length ? Math.round((user.ratings.reduce((s,r)=>s+r.ratingValue,0))/(user.ratings.length)) : 0} />
@@ -205,7 +269,7 @@ function ProfileHeader({ me, onPicChange, menu }) {
           </div>
         </div>
         <div className="flex-1">
-          <h3 className="font-semibold">{id ? `${user.username || 'Seller'}'s listings` : 'My listings'}</h3>
+          <h3 className="font-semibold">{id ? `${(user.username || user.name || user.displayName || user.fullName || (user.email ? String(user.email).split('@')[0] : 'Seller'))}'s listings` : 'My listings'}</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
             {myProducts.length ? myProducts.map(p=> <ProductCard key={p._id || p.id} product={p} />) : <div className="p-4 border rounded">No listings yet.</div>}
           </div>

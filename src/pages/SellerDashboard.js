@@ -4,8 +4,10 @@ import { auth } from '../firebase';
 import { Link } from 'react-router-dom';
 import ListNewItemModal from '../seller/ListNewItemModal';
 import ListingsPanel from '../seller/ListingsPanel';
+import MarkSoldModal from '../seller/MarkSoldModal';
 import ImpactReportPanel from '../seller/ImpactReportPanel';
 import FullScreenLoader from '../components/FullScreenLoader';
+import Toast from '../components/Toast';
 
 export default function SellerDashboard() {
   const [user, setUser] = useState(null);
@@ -17,6 +19,9 @@ export default function SellerDashboard() {
   const [editItem, setEditItem] = useState(null);
   const [categoryViews, setCategoryViews] = useState({});
   const [busy, setBusy] = useState(false); // blocks actions and shows fullscreen loader during network ops
+  const [markSoldOpen, setMarkSoldOpen] = useState(false);
+  const [markSoldProduct, setMarkSoldProduct] = useState(null);
+  const [toast, setToast] = useState({ open: false, message: '', variant: 'success' });
 
   // Compute nav button classes with a clear active highlight
   const navBtn = useMemo(() => (current) => {
@@ -98,6 +103,23 @@ export default function SellerDashboard() {
       }
     }
     loadListings();
+    // Load current points from user profile (backend preferred)
+    (async () => {
+      try {
+        const me = JSON.parse(localStorage.getItem('user') || 'null');
+        const id = (me && (me.id || me.uid)) || (auth.currentUser && auth.currentUser.uid) || null;
+        if (id) {
+          const res = await authFetch(`/api/users/${id}`);
+          if (res.ok) {
+            const u = await res.json();
+            const pts = Number(u.totalPoints || u.sellerPoints || 0) || 0;
+            setStats(prev => ({ ...prev, points: pts }));
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
     // Load per-user category views for dashboard widget
     (async () => {
       try {
@@ -281,6 +303,7 @@ export default function SellerDashboard() {
                   // Navigate to product detail page
                   window.location.href = `/product/${item.id || item._id}`;
                 }}
+                onMarkSold={(item) => { if (busy) return; setMarkSoldProduct(item); setMarkSoldOpen(true); }}
                 onStatusChange={(id, status) => {
                   if (busy) return;
                   setBusy(true);
@@ -339,6 +362,7 @@ export default function SellerDashboard() {
                       })();
                     }}
                     onView={item => { if (busy) return; window.location.href = `/product/${item.id || item._id}`; }}
+                    onMarkSold={(item) => { if (busy) return; setMarkSoldProduct(item); setMarkSoldOpen(true); }}
                     onStatusChange={(id, status) => {
                       if (busy) return;
                       setBusy(true);
@@ -484,6 +508,23 @@ export default function SellerDashboard() {
         )}
   {/* Analytics panel removed per request */}
         {view === 'impact' && <ImpactReportPanel />}
+        <MarkSoldModal
+          open={markSoldOpen}
+          product={markSoldProduct}
+          onClose={()=>{ setMarkSoldOpen(false); setMarkSoldProduct(null); }}
+          onMarked={({ productId, sellerPoints, alreadyAwarded }) => {
+            // update product status to sold and bump points
+            setListings(prev => prev.map(p => (p.id === productId || p._id === productId) ? { ...p, status: 'sold' } : p));
+            if (!alreadyAwarded) {
+              setStats(prev => ({ ...prev, points: (Number(prev.points)||0) + (Number(sellerPoints)||0) }));
+            }
+            const message = alreadyAwarded ? 'Sale recorded. Points already awarded previously.' : `Sale recorded. You earned +${sellerPoints} pts!`;
+            setToast({ open: true, message, variant: 'success' });
+          }}
+        />
+        <Toast open={toast.open} message={toast.message} variant={toast.variant}
+          onClose={() => setToast(prev => ({ ...prev, open: false }))}
+        />
         <ListNewItemModal
           open={modalOpen}
           onClose={()=>{setModalOpen(false); setEditItem(null);}}

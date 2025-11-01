@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function ListingsPanel({ listings, onEdit, onDelete, onView, onStatusChange, disabled = false }) {
+export default function ListingsPanel({ listings, onEdit, onDelete, onView, onStatusChange, onMarkSold, disabled = false }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
       {listings.length ? listings.map(item => {
@@ -32,7 +32,11 @@ export default function ListingsPanel({ listings, onEdit, onDelete, onView, onSt
                     {status === 'active' && (
                       <>
                         <button disabled={disabled} className={`px-3 py-1.5 text-xs rounded text-white ${disabled ? 'bg-yellow-300 cursor-not-allowed' : 'bg-yellow-500 hover:bg-yellow-600'}`} onClick={()=>!disabled && onStatusChange(id, 'pending')}>Set Pending</button>
-                        <button disabled={disabled} className={`px-3 py-1.5 text-xs rounded text-white ${disabled ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-700 hover:bg-gray-800'}`} onClick={()=>!disabled && onStatusChange(id, 'sold')}>Mark Sold</button>
+                        <button disabled={disabled} className={`px-3 py-1.5 text-xs rounded text-white ${disabled ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-700 hover:bg-gray-800'}`} onClick={()=>{
+                          if (disabled) return;
+                          if (typeof onMarkSold === 'function') onMarkSold(item);
+                          else onStatusChange && onStatusChange(id, 'sold');
+                        }}>Mark Sold</button>
                       </>
                     )}
                     {status === 'pending' && hasApproval && (

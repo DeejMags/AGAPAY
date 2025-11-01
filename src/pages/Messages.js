@@ -21,13 +21,16 @@ export default function Messages(){
   const listRef = useRef()
   
 
-  // Keep only one conversation per contact (prefer name-based grouping to merge authId/docId duplicates)
+  // Keep only one conversation per contact. Group by stable otherId; never group purely by name.
+  // This avoids collapsing different users into one when names are missing (e.g., "User").
   function coalesceByOtherId(items) {
     const best = new Map();
     items.forEach(c => {
       const nameKey = c.otherName ? String(c.otherName).trim().toLowerCase() : '';
-      // Prefer grouping by normalized name when available; fall back to id
-      const key = nameKey || (c.otherId ? String(c.otherId) : 'unknown');
+      const hasRealName = !!(nameKey && nameKey !== 'user');
+      const key = (c.otherId ? String(c.otherId) : null)
+        || (hasRealName ? nameKey : null)
+        || (c.chatId ? String(c.chatId) : `anon_${Math.random().toString(36).slice(2)}`);
       const ts = c.lastMessage?.createdAt || c.lastMessageAt || 0;
       if (!best.has(key)) best.set(key, c);
       else {

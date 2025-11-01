@@ -56,7 +56,7 @@ export default function AdminDashboard() {
   React.useEffect(() => {
     async function loadUsers() {
       try {
-        const res = await fetch('/api/users');
+        const res = await authFetch('/api/users');
         if (res.ok) {
           const data = await res.json();
           setUsers(Array.isArray(data) ? data : []);
@@ -87,6 +87,9 @@ export default function AdminDashboard() {
   // Load reports for sidebar badge (count open/in_review)
   const loadReports = React.useCallback(async () => {
     try {
+      // Avoid calling before auth is available to reduce 401 noise
+      const { auth } = await import('../firebase');
+      if (!auth.currentUser) return;
       const res = await authFetch('/api/reports');
       if (res.ok) {
         const json = await res.json();

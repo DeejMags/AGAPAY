@@ -112,13 +112,19 @@ export default function Navbar(){
               </button>
               {menuOpen && (
                 <div className="absolute right-0 mt-2 w-48 bg-white border rounded shadow py-2">
-                  <Link to="/profile" className="block px-4 py-2 hover:bg-gray-50">Profile</Link>
+                  {user.role !== 'admin' && (
+                    <>
+                      <Link to="/profile" className="block px-4 py-2 hover:bg-gray-50">Profile</Link>
+                    </>
+                  )}
                   {user.role === 'admin' ? (
                     <Link to="/admin" className="block px-4 py-2 hover:bg-gray-50">Admin Dashboard</Link>
                   ) : (
                     <Link to="/dashboard" className="block px-4 py-2 hover:bg-gray-50">Dashboard</Link>
                   )}
-                  <Link to="/settings" className="block px-4 py-2 hover:bg-gray-50">Settings</Link>
+                  {user.role !== 'admin' && (
+                    <Link to="/settings" className="block px-4 py-2 hover:bg-gray-50">Settings</Link>
+                  )}
                   <button onClick={handleLogout} className="w-full text-left px-4 py-2 hover:bg-gray-50">Logout</button>
                 </div>
               )}

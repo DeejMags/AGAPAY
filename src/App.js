@@ -36,7 +36,7 @@ function App(){
             <Route path="/upload" element={<ProtectedRoute><UploadProduct/></ProtectedRoute>} />
             <Route path="/login" element={<Login/>} />
             <Route path="/signup" element={<Signup/>} />
-            <Route path="/admin" element={<AdminDashboard/>} />
+            <Route path="/admin" element={<ProtectedRoute><AdminDashboard/></ProtectedRoute>} />
             {/* Shopping bag removed */}
             <Route path="/listings" element={<ProtectedRoute><Listings/></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><SellerDashboard/></ProtectedRoute>} />

@@ -202,7 +202,7 @@ export default function ProductManagement({ products: parentProducts = null, set
                   <td className="p-3">{p.price === null || p.price === undefined ? 'No price' : (typeof p.price === 'number' ? p.price.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : String(p.price))}</td>
                   <td className="p-3">{p.createdAt ? new Date(p.createdAt).toLocaleString() : '—'}</td>
                   <td className="p-3">{p.status}</td>
-              <td className="p-3">{p.sellerName || p.sellerId || 'Unknown'}</td>
+                  <td className="p-3">{p.sellerName || p.sellerDisplayName || (p.sellerEmail ? String(p.sellerEmail).split('@')[0] : '') || p.sellerId || 'Unknown'}</td>
                   <td className="p-3 flex gap-2 flex-wrap">
                     {/* If item is sold, do not render any action buttons */}
                     {((p.status || '').toString().toLowerCase() === 'sold') ? (

@@ -89,9 +89,50 @@ function normalizeStatus(raw) {
   return 'pending';
 }
 
-// ✅ Get all products (for admin dashboard + frontend)
-// Supports query params: status, page, pageSize, sortBy, sortDir, and mine=true to return the
-// authenticated seller's products (including pending/denied) when called from the seller dashboard.
+// ---- Points matrix helpers (configurable) ----
+// Normalize category strings into one of our supported buckets
+function normalizeCategory(input) {
+  if (!input) return 'Others';
+  const s = String(input).trim().toLowerCase();
+  if (/electronic|gadget|phone|laptop|pc|tablet|camera/.test(s)) return 'Electronics';
+  if (/home|living|kitchen|appliance|decor|garden|clean/.test(s)) return 'Home and Living';
+  if (/furniture|sofa|table|chair|bed|cabinet|desk/.test(s)) return 'Furniture';
+  if (/sport|fitness|gym|bike|bicycle|ball|racket|yoga/.test(s)) return 'Sports';
+  if (/fashion|clothes|apparel|shirt|pants|dress|shoe|bag|wear/.test(s)) return 'Fashion';
+  return 'Others';
+}
+
+// Default points matrix; can be overridden via env JSON (AGAPAY_POINTS_MATRIX)
+// Structure: { [Category]: { seller: number, buyer: number } }
+function loadPointsMatrix() {
+  try {
+    if (process.env.AGAPAY_POINTS_MATRIX) {
+      const obj = JSON.parse(process.env.AGAPAY_POINTS_MATRIX);
+      // basic shape validation
+      if (obj && typeof obj === 'object') return obj;
+    }
+  } catch (e) {
+    console.warn('Invalid AGAPAY_POINTS_MATRIX env:', e && e.message);
+  }
+  return {
+    'Electronics': { seller: 10, buyer: 5 },
+    'Home and Living': { seller: 8, buyer: 4 },
+    'Furniture': { seller: 12, buyer: 6 },
+    'Sports': { seller: 6, buyer: 3 },
+    'Fashion': { seller: 6, buyer: 3 },
+    'Others': { seller: 3, buyer: 3 },
+  };
+}
+
+const POINTS_MATRIX = loadPointsMatrix();
+
+function getPointsForCategory(category) {
+  const cat = normalizeCategory(category);
+  const row = POINTS_MATRIX[cat] || POINTS_MATRIX['Others'] || { seller: 0, buyer: 0 };
+  return { category: cat, sellerPoints: Number(row.seller) || 0, buyerPoints: Number(row.buyer) || 0 };
+}
+
+
 exports.getAllProducts = async (req, res) => {
   try {
     const { status, page = 1, pageSize = 50, sortBy = 'createdAt', sortDir = 'desc', includeSeller } = req.query;
@@ -103,36 +144,28 @@ exports.getAllProducts = async (req, res) => {
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const size = Math.min(200, Math.max(1, parseInt(pageSize, 10) || 50));
 
-  // Base collection reference
+ 
   let q = db.collection('products');
-  // Prepare snapshot variable early so fallback code can assign it (avoid TDZ issues)
   let snapshot;
 
-    // If requester asked for their own products, require authentication and limit to sellerId
     if (mine) {
-      // If auth middleware didn't run (route is public), attempt to verify bearer token here.
-      if (!req.user) {
+        if (!req.user) {
         try {
           const authHeader = (req.headers && req.headers.authorization) || '';
           const token = authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : authHeader || null;
           if (!token) return res.status(401).json({ error: 'Unauthorized' });
           const decoded = await admin.auth().verifyIdToken(token);
-          // attach minimal user info
           req.user = { id: decoded.uid, email: decoded.email, name: decoded.name, uid: decoded.uid };
         } catch (err) {
           console.warn('Failed to verify token for mine=true request:', err && err.message);
           return res.status(401).json({ error: 'Unauthorized' });
         }
       }
-      // First try matching by sellerId
       q = db.collection('products').where('sellerId', '==', req.user.id);
-      // perform the simple query now to check results; if zero results, we'll try fallback by owner email
       const initialSnap = await q.limit(1).get();
       if (initialSnap.empty && req.user && req.user.email) {
-        // Fallback: try matching older docs that used `owner` or email fields
         const emailQ = db.collection('products').where('owner', '==', req.user.email);
         const emailSnap = await emailQ.limit(size).get();
-        // replace snapshot with email results for processing below
         snapshot = emailSnap;
       }
     }
@@ -141,7 +174,6 @@ exports.getAllProducts = async (req, res) => {
   const isAdmin = isAdminRequest || explicitAdmin;
     console.log(`Fetching products as ${isAdmin ? 'admin' : 'public'} (status=${statusParam || (isAdmin ? 'all' : 'active')})`);
 
-    // Apply status filters. For 'mine' we avoid forcing 'active' so sellers see all their items.
     if (!mine) {
       if (statusParam) {
         q = q.where('status', '==', statusParam);
@@ -152,18 +184,21 @@ exports.getAllProducts = async (req, res) => {
       if (statusParam) q = q.where('status', '==', statusParam);
     }
 
-    // For seller-specific requests avoid complex queries that may require composite indexes
     if (mine) {
-      // If a previous fallback (email) already set snapshot, keep it; otherwise perform simple equality query
       if (!snapshot) snapshot = await q.limit(size).get();
     } else {
-      // Firestore requires ordering by an indexed single field
-      const direction = sortDir.toLowerCase() === 'asc' ? 'asc' : 'desc';
-      q = q.orderBy(sortBy, direction);
-
-      // Apply pagination
-      const offset = (pageNum - 1) * size;
-      snapshot = await q.offset(offset).limit(size).get();
+      // If we have a status filter (default public 'active'), skip orderBy to avoid composite index requirement
+      const hasStatusFilter = !!statusParam || (!isAdmin && !mine);
+      if (hasStatusFilter) {
+        // simple equality query + limit, sort in memory below
+        snapshot = await q.limit(size).get();
+      } else {
+        // No status filter: safe to order by createdAt or requested field
+        const direction = sortDir.toLowerCase() === 'asc' ? 'asc' : 'desc';
+        q = q.orderBy(sortBy, direction);
+        const offset = (pageNum - 1) * size;
+        snapshot = await q.offset(offset).limit(size).get();
+      }
     }
 
     let products = snapshot.docs.map(doc => {
@@ -238,8 +273,8 @@ exports.getAllProducts = async (req, res) => {
       products = deduped;
     }
 
-    // If we fetched seller-specific results without ordering, sort them in-memory by createdAt desc
-    if (mine && products.length > 0) {
+    // If we fetched without ordering (mine or public with status filter), sort in-memory by createdAt desc
+    if ((mine || (!!statusParam || (!isAdmin && !mine))) && products.length > 0) {
       products.sort((a,b) => {
         const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
         const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -290,14 +325,11 @@ exports.getAllProducts = async (req, res) => {
   }
 };
 
-// Storage helpers
 async function uploadFileToBucket(file, destinationPath) {
-  // file: multer file object with path and originalname
   const bucket = admin.storage().bucket();
   const options = { destination: destinationPath, resumable: false, metadata: { contentType: file.mimetype } };
   await bucket.upload(file.path, options);
-  // Make file publically readable if desired (optional)
-  try { await bucket.file(destinationPath).makePublic(); } catch (e) { /* ignore permission errors */ }
+  try { await bucket.file(destinationPath).makePublic(); } catch (e) { console.error('Failed to make file public', e); }
   const publicUrl = `https://storage.googleapis.com/${bucket.name}/${encodeURIComponent(destinationPath)}`;
   return { path: destinationPath, url: publicUrl };
 }
@@ -308,20 +340,16 @@ async function deleteFileFromBucket(path) {
   try {
     await bucket.file(path).delete();
   } catch (err) {
-    // Log and continue
     console.warn('Failed to delete file from bucket', path, err.message || err);
   }
 }
 
-// ✅ Create a new product (handles optional file upload via multer `req.file`)
 exports.createProduct = async (req, res) => {
   try {
-    // If multer was used, req.file contains file metadata and a temp path
     const uploadedFile = req.file;
     const data = req.body || {};
     const createdAt = admin.firestore.FieldValue.serverTimestamp();
 
-    // Prefer server-supplied seller id from auth middleware
     const authUser = req.user || {};
     const sellerId = authUser.id || authUser.uid || data.sellerId || '';
     const sellerName = authUser.name || authUser.displayName || data.sellerName || data.seller || '';
@@ -334,11 +362,9 @@ exports.createProduct = async (req, res) => {
       const uploaded = await uploadFileToBucket(uploadedFile, destPath);
       imageUrl = uploaded.url;
       imagePath = uploaded.path;
-      // Remove local temp file created by multer
       try { require('fs').unlinkSync(uploadedFile.path); } catch (e) { /* ignore */ }
     }
 
-    // Always default new products to 'pending' unless server-side logic decides otherwise
     const newProduct = {
       title: data.title || data.name || 'Untitled Product',
       description: data.description || data.desc || '',
@@ -355,10 +381,8 @@ exports.createProduct = async (req, res) => {
 
     const ref = await db.collection('products').add(newProduct);
 
-    // Read back the created document so we can return a serializable createdAt
     const createdDoc = await ref.get();
     const createdData = createdDoc.data();
-    // Derive public image URL from imagePath when needed
     let createdImageUrl = '';
     if (createdData.imageUrl) createdImageUrl = createdData.imageUrl;
     else if (createdData.photo) createdImageUrl = createdData.photo;
@@ -386,7 +410,6 @@ exports.createProduct = async (req, res) => {
   }
 };
 
-// ✅ Get product by ID
 exports.getProductById = async (req, res) => {
   try {
     const docRef = db.collection('products').doc(req.params.id);
@@ -397,7 +420,6 @@ exports.getProductById = async (req, res) => {
     }
 
     const d = doc.data();
-    // derive public image url if necessary
     let docImageUrl = '';
     if (d.imageUrl) docImageUrl = d.imageUrl;
     else if (d.photo) docImageUrl = d.photo;
@@ -424,22 +446,18 @@ exports.getProductById = async (req, res) => {
   }
 };
 
-// ✅ Update product (for approve/deny/edit in admin)
 exports.updateProduct = async (req, res) => {
   try {
     const data = req.body || {};
     const uploadedFile = req.file;
 
-    // Normalize status value provided by client
     const normalizedStatus = data.status ? normalizeStatus(data.status) : undefined;
 
     const updates = { ...data, updatedAt: admin.firestore.FieldValue.serverTimestamp() };
     if (normalizedStatus) updates.status = normalizedStatus;
 
-    // Admin actions: approving or denying
     if (updates.status === 'active') {
       updates.publishedAt = admin.firestore.FieldValue.serverTimestamp();
-      // clear denied fields when approving
       updates.deniedAt = null;
       updates.adminMessage = null;
     }
@@ -561,5 +579,108 @@ exports.deleteProduct = async (req, res) => {
   } catch (err) {
     console.error('Error deleting product:', err);
     res.status(500).json({ error: err.message });
+  }
+};
+
+// ✅ Mark product as sold and award points (idempotent)
+// Auth: seller of the product or admin
+// Body: { buyerId: string, finalPrice?: number }
+exports.markSold = async (req, res) => {
+  try {
+    const productId = String(req.params.id);
+    const buyerId = req.body && (req.body.buyerId || req.body.buyer || req.body.userId);
+    const finalPrice = parsePrice(req.body && (req.body.finalPrice ?? req.body.price));
+
+    if (!buyerId) return res.status(400).json({ error: 'buyerId_required' });
+
+    const productRef = db.collection('products').doc(productId);
+    const productSnap = await productRef.get();
+    if (!productSnap.exists) return res.status(404).json({ error: 'product_not_found' });
+    const product = productSnap.data() || {};
+
+    const sellerId = product.sellerId || product.owner || null;
+    if (!sellerId) return res.status(400).json({ error: 'product_missing_seller' });
+
+    // Authorization: seller or admin
+    const isAdmin = !!(req.user && (req.user.isAdmin || req.user.admin || req.user.role === 'admin' || (req.user.roles || []).includes('admin') || (req.user.customClaims && (req.user.customClaims.isAdmin || req.user.customClaims.admin || req.user.customClaims.role === 'admin'))));
+    const isSeller = !!(req.user && (req.user.id === sellerId || req.user.uid === sellerId));
+    if (!isAdmin && !isSeller) return res.status(403).json({ error: 'forbidden' });
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const { category: normCat, sellerPoints, buyerPoints } = getPointsForCategory(product.category || '');
+    const historyId = `${productId}_${buyerId}`; // de-dupe per product-buyer
+    const historyRef = db.collection('points_history').doc(historyId);
+    const sellerRef = db.collection('users').doc(String(sellerId));
+    const buyerRef = db.collection('users').doc(String(buyerId));
+
+    let alreadyAwarded = false;
+
+    await db.runTransaction(async (tx) => {
+      const freshProduct = await tx.get(productRef);
+      if (!freshProduct.exists) throw new Error('product_not_found');
+      const pdata = freshProduct.data() || {};
+
+      // If already sold and points awarded, exit early
+      if (pdata.status === 'sold' && pdata.pointsAwarded) { alreadyAwarded = true; return; }
+
+      // Check for existing history (idempotency safeguard)
+      const histSnap = await tx.get(historyRef);
+      if (histSnap.exists) { alreadyAwarded = true; }
+
+      // Update product to sold (if not already)
+      const productUpdate = {
+        status: 'sold',
+        soldAt: now,
+        updatedAt: now,
+        pointsAwarded: true,
+        buyerId: String(buyerId),
+      };
+      if (finalPrice !== null && finalPrice !== undefined) productUpdate.salePrice = finalPrice;
+      tx.set(productRef, productUpdate, { merge: true });
+
+      if (!alreadyAwarded) {
+        // Increment points for seller and buyer
+        tx.set(sellerRef, {
+          sellerPoints: admin.firestore.FieldValue.increment(sellerPoints),
+          totalPoints: admin.firestore.FieldValue.increment(sellerPoints),
+          updatedAt: now,
+        }, { merge: true });
+        tx.set(buyerRef, {
+          buyerPoints: admin.firestore.FieldValue.increment(buyerPoints),
+          totalPoints: admin.firestore.FieldValue.increment(buyerPoints),
+          updatedAt: now,
+        }, { merge: true });
+
+        // Record history
+        tx.set(historyRef, {
+          productId,
+          sellerId,
+          buyerId: String(buyerId),
+          category: normCat,
+          sellerPoints,
+          buyerPoints,
+          totalPoints: (sellerPoints + buyerPoints),
+          createdAt: now,
+        }, { merge: true });
+      }
+    });
+
+    // respond with updated product doc
+    const updated = await productRef.get();
+    const ud = updated.data() || {};
+    res.json({
+      id: updated.id,
+      status: ud.status || 'sold',
+      buyerId: ud.buyerId || String(buyerId),
+      salePrice: parsePrice(ud.salePrice),
+      pointsAwarded: !!ud.pointsAwarded,
+      category: normCat,
+      sellerPoints,
+      buyerPoints,
+      alreadyAwarded,
+    });
+  } catch (err) {
+    console.error('markSold error:', err);
+    res.status(500).json({ error: err.message || String(err) });
   }
 };

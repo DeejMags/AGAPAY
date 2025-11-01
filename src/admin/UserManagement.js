@@ -18,18 +18,55 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
   // auto-hide handled via effect below
   
 
+  // Helper to consistently compute a user's display name
+  const getDisplayName = (u) => {
+    if (!u) return '';
+    // Prefer explicit name fields; fall back to email prefix to avoid blank names
+    const name = u.username || u.name || u.displayName || u.fullName || (u.email ? String(u.email).split('@')[0] : '');
+    return name;
+  };
+
   useEffect(() => {
     // If parent provided users, use them; otherwise fetch from backend then Firestore
     let mounted = true;
+    async function enrichMissing(list) {
+      // For users missing visible name/email, try to enrich via backend /api/users/:id (which falls back to Firebase Auth)
+      const need = (list || []).filter(u => {
+        const hasName = !!(u.username || u.name || u.displayName || u.fullName);
+        const hasEmail = !!u.email;
+        return !hasName || !hasEmail;
+      }).slice(0, 50); // limit per pass to avoid flooding
+      if (need.length === 0) return list;
+      const updates = {};
+      await Promise.all(need.map(async (u) => {
+        try {
+          const res = await authFetch(`/api/users/${encodeURIComponent(u.id)}`);
+          if (res && res.ok) {
+            const j = await res.json();
+            updates[u.id] = {
+              username: j.username || j.displayName || u.username,
+              name: j.name || u.name,
+              displayName: j.displayName || j.username || u.displayName,
+              fullName: j.fullName || u.fullName,
+              email: j.email || u.email,
+            };
+          }
+        } catch { /* ignore per-user errors */ }
+      }));
+      if (Object.keys(updates).length === 0) return list;
+      return list.map(u => updates[u.id] ? { ...u, ...updates[u.id] } : u);
+    }
     async function fetchUsers() {
       setLoading(true);
       try {
         // Try backend first
-        const res = await fetch('/api/users');
+        const res = await authFetch('/api/users');
         if (res.ok) {
           const data = await res.json();
           if (mounted) {
-            setUsers(Array.isArray(data) ? data : []);
+            const base = Array.isArray(data) ? data : [];
+            const enriched = await enrichMissing(base);
+            setUsers(enriched);
             setLoading(false);
             return;
           }
@@ -41,7 +78,8 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
       try {
         const querySnapshot = await getDocs(collection(db, 'users'));
         const userList = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        if (mounted) setUsers(userList);
+        const enriched = await enrichMissing(userList);
+        if (mounted) setUsers(enriched);
       } catch (err) {
         console.error('Error fetching users from Firestore:', err);
         if (mounted) setUsers([]);
@@ -51,15 +89,25 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
     }
 
     if (parentUsers) {
-      setUsers(parentUsers);
-      setLoading(false);
+      (async () => {
+        const enriched = await enrichMissing(parentUsers);
+        if (mounted) setUsers(enriched);
+        if (mounted) setLoading(false);
+      })();
     } else {
       fetchUsers();
     }
     return () => { mounted = false; };
   }, [parentUsers]);
 
-  const filtered = users.filter(u => (u.username || u.name || '').toLowerCase().includes(search.toLowerCase()));
+  const filtered = users.filter(u => {
+    const q = search.toLowerCase();
+    return (
+      (getDisplayName(u) || '').toLowerCase().includes(q) ||
+      (u.email || '').toLowerCase().includes(q) ||
+      String(u.id || '').toLowerCase().includes(q)
+    );
+  });
 
   // Edit action removed: admin may use Ban/Delete which are handled below.
 
@@ -153,11 +201,24 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
   async function refresh() {
     setLoading(true);
     try {
-      const res = await fetch('/api/users');
+      const res = await authFetch('/api/users');
       if (res.ok) {
         const data = await res.json();
-        setUsers(Array.isArray(data) ? data : []);
-        if (setParentUsers) setParentUsers(Array.isArray(data) ? data : []);
+        const base = Array.isArray(data) ? data : [];
+        const enriched = await (async () => {
+          try { return await (async (l)=>{ // inline call to reuse logic without hoisting issues
+            const need = (l || []).filter(u => !(u.username||u.name||u.displayName||u.fullName) || !u.email).slice(0,50);
+            if (need.length===0) return l;
+            const updates = {};
+            await Promise.all(need.map(async (u)=>{
+              try { const r = await authFetch(`/api/users/${encodeURIComponent(u.id)}`); if (r&&r.ok) { const j = await r.json(); updates[u.id] = { username: j.username||j.displayName||u.username, name: j.name||u.name, displayName: j.displayName||j.username||u.displayName, fullName: j.fullName||u.fullName, email: j.email||u.email }; } } catch {}
+            }));
+            if (Object.keys(updates).length===0) return l;
+            return l.map(u => updates[u.id] ? { ...u, ...updates[u.id] } : u);
+          })(base); } catch { return base; }
+        })();
+        setUsers(enriched);
+        if (setParentUsers) setParentUsers(enriched);
         return;
       }
     } catch (err) {
@@ -166,8 +227,17 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
     try {
       const qs = await getDocs(collection(db, 'users'));
       const list = qs.docs.map(d => ({ id: d.id, ...d.data() }));
-      setUsers(list);
-      if (setParentUsers) setParentUsers(list);
+      // Reuse enrichMissing from initial effect
+      try { const enriched = await (async (l)=>{
+        const need = (l || []).filter(u => !(u.username||u.name||u.displayName||u.fullName) || !u.email).slice(0,50);
+        if (need.length===0) return l;
+        const updates = {};
+        await Promise.all(need.map(async (u)=>{
+          try { const r = await authFetch(`/api/users/${encodeURIComponent(u.id)}`); if (r&&r.ok) { const j = await r.json(); updates[u.id] = { username: j.username||j.displayName||u.username, name: j.name||u.name, displayName: j.displayName||j.username||u.displayName, fullName: j.fullName||u.fullName, email: j.email||u.email }; } } catch {}
+        }));
+        if (Object.keys(updates).length===0) return l;
+        return l.map(u => updates[u.id] ? { ...u, ...updates[u.id] } : u);
+      })(list); setUsers(enriched); if (setParentUsers) setParentUsers(enriched); } catch { setUsers(list); if (setParentUsers) setParentUsers(list); }
     } catch (err) {
       console.error('Refresh failed to load users from Firestore:', err);
       setUsers([]);
@@ -202,9 +272,12 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
             <tbody className="divide-y">
               {filtered.map(u => (
                 <tr key={u.id} className="bg-white">
-                  <td className="p-3 align-top">{u.username || u.name}</td>
-                  <td className="p-3 align-top">{u.email}</td>
-                  <td className="p-3 align-top">{u.phone || ''}</td>
+                  <td className="p-3 align-top">
+                    <div className="font-medium">{getDisplayName(u) || '—'}</div>
+                    <code className="text-xs text-gray-500 break-all font-mono select-all" title={String(u.id || '')}>{u.id}</code>
+                  </td>
+                  <td className="p-3 align-top">{u.email || '—'}</td>
+                  <td className="p-3 align-top">{u.phone || '—'}</td>
                   <td className="p-3 align-top">
                     <div className="flex items-center gap-2 whitespace-nowrap">
                       {(() => {
@@ -220,13 +293,13 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
                             <button
                               className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition"
                               onClick={() => openBanConfirm(u.id)}
-                              aria-label={`Ban ${u.username || u.name}`}>
+                              aria-label={`Ban ${getDisplayName(u) || u.id}`}>
                               Ban
                             </button>
                             <button
                               className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition"
                               onClick={() => openDeleteConfirm(u.id)}
-                              aria-label={`Delete ${u.username || u.name}`}>
+                              aria-label={`Delete ${getDisplayName(u) || u.id}`}>
                               Delete
                             </button>
                           </>

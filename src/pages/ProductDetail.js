@@ -127,8 +127,6 @@ export default function ProductDetail(){
   function openChat(){
     (async () => {
       try {
-  const { auth } = await import('../firebase');
-  const me = JSON.parse(localStorage.getItem('user') || 'null');
         const productId = product ? (product._id || product.id) : null;
         const otherId = (seller && seller.id) ? seller.id : (productId ? `seller_${productId}` : 'unknown');
         const svc = await import('../firebaseMessageService');

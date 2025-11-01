@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { auth } from '../firebase';
+import authFetch from '../utils/authFetch';
 import { useNavigate } from 'react-router-dom';
 
 export default function Reviews() {
@@ -7,6 +8,9 @@ export default function Reviews() {
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState([]); // list of sold items with buyer info
   const [ratings, setRatings] = useState({}); // buyerId -> { rating, comment }
+  const [myReviews, setMyReviews] = useState([]); // existing reviews authored by me
+  const [reviewMap, setReviewMap] = useState({}); // key: `${productId}_${buyerId}` => review
+  const [buyers, setBuyers] = useState({}); // buyerId -> { name, email }
 
   // Sidebar nav button classes (matches SellerDashboard look & feel)
   const navBtn = useMemo(() => (activeKey, currentKey = 'reviews') => {
@@ -31,7 +35,7 @@ export default function Reviews() {
         // Try backend endpoint if available in future; for now pull from products/transactions in Firestore fallback below
       } catch (e) {}
 
-      // Firestore fallback: find seller's sold products and mock buyer (to be replaced with real order data)
+    // Firestore: find seller's sold products and load existing reviews
       try {
   const { db } = await import('../firebase');
   const { collection, getDocs, query, where } = await import('firebase/firestore');
@@ -51,6 +55,63 @@ export default function Reviews() {
           soldAt: p.soldAt || p.updatedAt || p.createdAt || Date.now(),
         }));
         if (!cancelled) setOrders(enriched);
+
+        // Load my existing reviews (support both field names)
+        const r1 = await getDocs(query(collection(db, 'reviews'), where('sellerId', '==', uid)));
+        const r2 = await getDocs(query(collection(db, 'reviews'), where('reviewerId', '==', uid)));
+        const combined = [...r1.docs, ...r2.docs].reduce((arr, d) => {
+          // de-dupe by doc id
+          if (!arr.some(x => x.id === d.id)) arr.push(d);
+          return arr;
+        }, []);
+        const reviews = combined.map(d => ({ id: d.id, ...d.data() }));
+        if (!cancelled) setMyReviews(reviews);
+        // Build quick lookup map
+        const map = {};
+        for (const r of reviews) {
+          const productId = r.productId || r.itemId;
+          const buyerId = r.buyerId || r.revieweeId;
+          if (productId && buyerId) map[`${productId}_${buyerId}`] = r;
+        }
+        if (!cancelled) setReviewMap(map);
+
+        // Fetch buyer profiles (from orders and reviews) to show real names
+        const buyerIds = Array.from(new Set([
+          ...enriched.map(o => o.buyerId).filter(Boolean),
+          ...reviews.map(r => r.buyerId || r.revieweeId).filter(Boolean)
+        ]));
+        if (buyerIds.length > 0) {
+          const results = {};
+          await Promise.all(buyerIds.map(async (id) => {
+            // Try backend profile lookup first
+            try {
+              const res = await authFetch(`/api/users/${id}`);
+              if (res && res.ok) {
+                const u = await res.json();
+                const name = u.name || u.displayName || u.username || u.fullName || (u.email ? u.email.split('@')[0] : id);
+                results[id] = { name, email: u.email || null };
+                return;
+              }
+            } catch (e) { /* fall through to Firestore */ }
+            // Firestore fallback
+            try {
+              const { doc, getDoc } = await import('firebase/firestore');
+              const { db } = await import('../firebase');
+              const ref = doc(db, 'users', id);
+              const usnap = await getDoc(ref);
+              if (usnap.exists()) {
+                const u = usnap.data() || {};
+                const name = u.name || u.displayName || u.username || (u.email ? u.email.split('@')[0] : id);
+                results[id] = { name, email: u.email || null };
+              } else {
+                results[id] = { name: id, email: null };
+              }
+            } catch (e) {
+              results[id] = { name: id, email: null };
+            }
+          }));
+          if (!cancelled) setBuyers(results);
+        }
       } catch (e) {
         if (!cancelled) setOrders([]);
       } finally {
@@ -79,12 +140,17 @@ export default function Reviews() {
         productId: order.id,
         rating: Number(data.rating),
         comment: data.comment || '',
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        // canonical fields too
+        reviewerId: auth.currentUser.uid,
+        revieweeId: order.buyerId || null,
       };
-      await addDoc(collection(db, 'reviews'), review);
+      const docRef = await addDoc(collection(db, 'reviews'), review);
       // Clear local input
       setRatings(prev => ({ ...prev, [order.buyerId || order.id]: { rating: '', comment: '' } }));
-      alert('Review submitted');
+      const newRev = { id: docRef.id, ...review };
+      setMyReviews(prev => [newRev, ...prev]);
+      setReviewMap(prev => ({ ...prev, [`${order.id}_${order.buyerId}`]: newRev }));
     } catch (e) {
       console.error('Failed to submit review', e);
       alert('Failed to submit review');
@@ -166,13 +232,42 @@ export default function Reviews() {
       <main className="flex-1 p-8">
         <div className="bg-white rounded-2xl shadow p-6">
           <h3 className="text-xl font-bold mb-4">Buyer Reviews</h3>
+          {/* Past reviews */}
+          {myReviews.length > 0 && (
+            <div className="mb-8">
+              <div className="text-sm font-semibold text-gray-700 mb-2">Your Past Reviews</div>
+              <div className="grid gap-3">
+                {myReviews.slice(0, 20).map(r => (
+                  <div key={r.id} className="p-3 border rounded-lg bg-gray-50">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm">
+                        <span className="font-medium">{(orders.find(o => o.id === r.productId)?.productName) || 'Item'}</span>
+                        <span className="mx-2 text-gray-400">•</span>
+                        <span className="text-gray-600">Buyer: {(() => {
+                          const bid = r.revieweeId || r.buyerId;
+                          if (bid && buyers[bid]?.name) return buyers[bid].name;
+                          const o = orders.find(o => o.id === r.productId);
+                          return (o && (buyers[o.buyerId]?.name || o.buyerName)) || bid || '—';
+                        })()}</span>
+                      </div>
+                      <div className="text-amber-600 font-semibold">{Number(r.rating) || 0} ★</div>
+                    </div>
+                    {r.comment && <div className="text-sm text-gray-700 mt-1">{r.comment}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {loading ? (
             <div className="text-gray-500">Loading…</div>
           ) : orders.length === 0 ? (
             <div className="text-gray-500">No sold items yet.</div>
           ) : (
             <div className="space-y-4">
-              {orders.map(order => (
+              {orders.map(order => {
+                const key = `${order.id}_${order.buyerId}`;
+                const existing = reviewMap[key];
+                return (
                 <div key={order.id} className="p-4 border rounded-xl">
                   <div className="flex justify-between items-center mb-2">
                     <div>
@@ -181,40 +276,53 @@ export default function Reviews() {
                     </div>
                     <div className="text-right">
                       <div className="text-sm text-gray-500">Buyer</div>
-                      <div className="font-medium">{order.buyerName}</div>
+                      <div className="font-medium">{buyers[order.buyerId]?.name || order.buyerName}</div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-                    <div>
-                      <label className="block text-xs text-gray-600 mb-1">Rating</label>
-                      <select
-                        className="border rounded px-2 py-1 w-full"
-                        value={(ratings[order.buyerId || order.id]?.rating) || ''}
-                        onChange={e => setRatings(prev => ({ ...prev, [order.buyerId || order.id]: { ...(prev[order.buyerId || order.id] || {}), rating: e.target.value } }))}
-                      >
-                        <option value="">Select</option>
-                        {[5,4,3,2,1].map(n => <option key={n} value={n}>{n} ★</option>)}
-                      </select>
+                  {!existing ? (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                        <div>
+                          <label className="block text-xs text-gray-600 mb-1">Rating</label>
+                          <select
+                            className="border rounded px-2 py-1 w-full"
+                            value={(ratings[order.buyerId || order.id]?.rating) || ''}
+                            onChange={e => setRatings(prev => ({ ...prev, [order.buyerId || order.id]: { ...(prev[order.buyerId || order.id] || {}), rating: e.target.value } }))}
+                          >
+                            <option value="">Select</option>
+                            {[5,4,3,2,1].map(n => <option key={n} value={n}>{n} ★</option>)}
+                          </select>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs text-gray-600 mb-1">Comment (optional)</label>
+                          <input
+                            className="border rounded px-2 py-1 w-full"
+                            placeholder="Leave a note for the buyer…"
+                            value={(ratings[order.buyerId || order.id]?.comment) || ''}
+                            onChange={e => setRatings(prev => ({ ...prev, [order.buyerId || order.id]: { ...(prev[order.buyerId || order.id] || {}), comment: e.target.value } }))}
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-3 flex justify-end">
+                        <button
+                          className="px-4 py-2 bg-teal-600 text-white rounded"
+                          onClick={() => submitReview(order)}
+                          disabled={!ratings[order.buyerId || order.id]?.rating}
+                        >Submit Review</button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="mt-2 bg-emerald-50 border border-emerald-200 rounded p-3 flex items-center justify-between">
+                      <div className="text-sm text-emerald-800">
+                        <span className="font-medium">Already reviewed</span>
+                        {existing.comment ? <span className="ml-2">— {existing.comment}</span> : null}
+                      </div>
+                      <div className="text-amber-600 font-semibold">{Number(existing.rating) || 0} ★</div>
                     </div>
-                    <div className="sm:col-span-2">
-                      <label className="block text-xs text-gray-600 mb-1">Comment (optional)</label>
-                      <input
-                        className="border rounded px-2 py-1 w-full"
-                        placeholder="Leave a note for the buyer…"
-                        value={(ratings[order.buyerId || order.id]?.comment) || ''}
-                        onChange={e => setRatings(prev => ({ ...prev, [order.buyerId || order.id]: { ...(prev[order.buyerId || order.id] || {}), comment: e.target.value } }))}
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-3 flex justify-end">
-                    <button
-                      className="px-4 py-2 bg-teal-600 text-white rounded"
-                      onClick={() => submitReview(order)}
-                      disabled={!ratings[order.buyerId || order.id]?.rating}
-                    >Submit Review</button>
-                  </div>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
