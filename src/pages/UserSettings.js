@@ -283,7 +283,6 @@ export default function UserSettings() {
             <div className={`mt-2 text-sm ${saveStatus.includes('successfully') ? 'text-green-600' : 'text-red-600'}`}>{saveStatus}</div>
           )}
         </form>
-        <button type="button" className="mt-4 px-4 py-2 bg-gray-200 text-gray-700 rounded">Change Password</button>
         <div className="mt-4 flex gap-4">
             <button
               type="button"
