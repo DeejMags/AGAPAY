@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { auth, authReady } from '../firebase';
+import { auth } from '../firebase';
 import { subscribeToUserConversations } from '../firebaseMessageService';
 
 // Subscribes to user's conversations and computes total unread for this user.
@@ -11,7 +11,14 @@ export default function useUnreadMessages() {
     let unsub = null;
     let cancelled = false;
     (async () => {
-      await authReady;
+      // Wait briefly for Firebase auth to initialize so we can get currentUser
+      if (!auth.currentUser) {
+        await new Promise(resolve => {
+          const done = () => resolve();
+          const t = setTimeout(done, 2000);
+          const off = auth.onAuthStateChanged(() => { clearTimeout(t); off(); done(); });
+        });
+      }
       const me = (auth && auth.currentUser && auth.currentUser.uid) || (JSON.parse(localStorage.getItem('user') || 'null')?.id);
       if (!me) { setTotalUnread(0); return; }
       try {

@@ -13,6 +13,16 @@ export default function ProductDetail(){
   const [index, setIndex] = useState(0)
   const navigate = useNavigate()
   const [recommended, setRecommended] = useState([])
+  function goBackToMarketplace(){
+    try {
+      const ref = document.referrer || '';
+      if (ref && /\/marketplace(\?|$|#)/i.test(ref)) {
+        navigate(-1);
+        return;
+      }
+    } catch {}
+    navigate('/marketplace');
+  }
 
   useEffect(()=>{
     setLoading(true)
@@ -24,10 +34,25 @@ export default function ProductDetail(){
           if (res.ok) {
             const json = await res.json();
             setProduct(json);
-            if (json && json.sellerId) {
+            // Load seller profile with robust fallbacks: sellerId -> owner(email) -> inline sellerName
+            if (json) {
               try {
-                const r2 = await fetch(`/api/users/${json.sellerId}`);
-                if (r2.ok) setSeller(await r2.json());
+                if (json.sellerId) {
+                  const r2 = await fetch(`/api/users/${json.sellerId}`);
+                  if (r2.ok) {
+                    setSeller(await r2.json());
+                  } else if (json.owner) {
+                    const r3 = await fetch(`/api/users/${encodeURIComponent(json.owner)}`);
+                    if (r3.ok) setSeller(await r3.json());
+                  } else if (json.sellerName) {
+                    setSeller({ id: json.sellerId || json.owner || 'unknown', username: json.sellerName });
+                  }
+                } else if (json.owner) {
+                  const r3 = await fetch(`/api/users/${encodeURIComponent(json.owner)}`);
+                  if (r3.ok) setSeller(await r3.json());
+                } else if (json.sellerName) {
+                  setSeller({ id: json.sellerId || json.owner || 'unknown', username: json.sellerName });
+                }
               } catch (e) { console.warn('Failed to fetch seller profile', e); }
             }
             setLoading(false);
@@ -65,9 +90,11 @@ export default function ProductDetail(){
       try {
         const res = await fetch('/api/products');
         let products = [];
-        if (res.ok) products = await res.json();
-        else throw new Error('API failed');
-        setRecommended((products || []).filter(p=> p._id !== product._id && p.category === product.category).slice(0,4))
+        if (res.ok) {
+          const json = await res.json();
+          products = Array.isArray(json) ? json : (json.items || []);
+        } else throw new Error('API failed');
+        setRecommended((products || []).filter(p=> (p._id || p.id) !== (product._id || product.id) && p.category === product.category).slice(0,4))
       } catch (err) {
         try {
           const { collection, getDocs } = await import('firebase/firestore');
@@ -131,7 +158,8 @@ export default function ProductDetail(){
         const otherId = (seller && seller.id) ? seller.id : (productId ? `seller_${productId}` : 'unknown');
         const svc = await import('../firebaseMessageService');
         // Prefer backend start API so the collection/doc is created even if it was deleted previously
-        const convId = await svc.startConversation(otherId, { productId, productName: product ? product.title : null, productImage: Array.isArray(product?.photo) ? product.photo[0] : product?.photo || null });
+        const primaryImage = (product && product.imageUrl) || (Array.isArray(product?.photo) ? product.photo[0] : product?.photo) || null;
+        const convId = await svc.startConversation(otherId, { productId, productName: product ? product.title : null, productImage: primaryImage });
         if (convId && typeof convId === 'string') localStorage.setItem('agapay_active_conv', convId);
         else localStorage.setItem('agapay_active_conv', productId || id);
         navigate('/messages');
@@ -146,10 +174,33 @@ export default function ProductDetail(){
 
   if(!product) return <div className="py-8 container mx-auto px-4">Product not found</div>
 
-  const images = Array.isArray(product.photo) ? product.photo : (product.photo ? [product.photo] : [])
+  // Build robust image list preferring Cloudinary imageUrl, then photo array/string
+  const images = (() => {
+    const list = [];
+    if (product && product.imageUrl) list.push(product.imageUrl);
+    if (product && Array.isArray(product.photo)) list.push(...product.photo);
+    else if (product && product.photo) list.push(product.photo);
+    // Dedupe and remove falsy
+    return Array.from(new Set(list.filter(Boolean)));
+  })();
+
+  // Compute seller display name; avoid showing email
+  const sellerDisplayName = (() => {
+    if (seller) {
+      const name = seller.username || seller.name || seller.displayName || seller.fullName;
+      if (name) return name;
+      if (seller.email && typeof seller.email === 'string') return seller.email.split('@')[0];
+    }
+    return product?.sellerName || 'Seller';
+  })();
 
   return (
-    <div className="py-8 container mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div className="py-8 container mx-auto px-4">
+      <button type="button" onClick={goBackToMarketplace} className="inline-flex items-center gap-2 text-teal-600 hover:text-teal-700" aria-label="Back to Marketplace">
+        <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#3FD2A6"><path d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"/></svg>
+        <span className="hidden sm:inline font-medium">Back to Marketplace</span>
+      </button>
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-6">
   <div className="md:col-span-2">
         <div className="bg-gray-100 rounded overflow-hidden">
           {images.length > 1 ? (
@@ -162,12 +213,12 @@ export default function ProductDetail(){
               </div>
             </div>
           ) : (
-            <img src={images[0] || ''} alt={product.title} className="w-full h-64 sm:h-96 object-cover" />
+            <img src={images[0] || 'https://via.placeholder.com/800x600?text=No+Image'} alt={product.title} className="w-full h-64 sm:h-96 object-cover" />
           )}
         </div>
-        <h1 className="text-2xl font-bold mt-4">{product.title}</h1>
+        <h1 className="text-2xl font-bold mt-4">{product.title || product.name || 'Product'}</h1>
         <div className="text-xl text-teal-600">\u20b1{product.price}</div>
-  <div className="mt-3 text-gray-700">{product.desc}</div>
+  <div className="mt-3 text-gray-700">{product.desc || product.description}</div>
   <div className="mt-2 text-sm text-gray-500">Category: {product.category} \u00b7 Location: {product.location}</div>
       </div>
       <aside className="md:col-span-1">
@@ -175,8 +226,7 @@ export default function ProductDetail(){
           <div className="flex items-center gap-3">
             <img src={seller?.profilePic || ''} alt={seller ? `${seller.username} profile` : 'Seller profile'} className="w-12 h-12 bg-gray-200 rounded-full object-cover" />
             <div>
-              <div className="font-semibold">{seller ? seller.username : 'Seller'}</div>
-              <div className="text-xs text-gray-500">{seller ? seller.email : ''}</div>
+              <div className="font-semibold">{sellerDisplayName}</div>
             </div>
           </div>
           {/* View Item removed on Product page as requested */}
@@ -217,6 +267,7 @@ export default function ProductDetail(){
           </div>
         </div>
       )}
+    </div>
     </div>
   )
 }

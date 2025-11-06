@@ -1,6 +1,7 @@
 // controllers/productController.js
 const { admin, db } = require('../config/firebaseAdmin');
 const nodemailer = require('nodemailer');
+const cloudinary = require('../config/cloudinary');
 
 // Create a nodemailer transporter if SMTP env vars are present
 let transporter = null;
@@ -87,6 +88,37 @@ function normalizeStatus(raw) {
   const lower = raw.toLowerCase();
   for (const s of VALID_STATUSES) if (lower.includes(s)) return s;
   return 'pending';
+}
+
+// Upload a product image to Cloudinary and return a secure URL
+exports.uploadImageCloudinary = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'no_file' });
+    if (!cloudinary || !process.env.CLOUDINARY_CLOUD_NAME) return res.status(500).json({ error: 'cloudinary_not_configured' });
+    const folder = process.env.CLOUDINARY_FOLDER || 'agapay/products';
+    const opts = { folder, resource_type: 'image', overwrite: false, transformation: [{ quality: 'auto', fetch_format: 'auto' }] };
+
+    const { PassThrough } = require('stream');
+    const stream = cloudinary.uploader.upload_stream(opts, (err, result) => {
+      if (err) return res.status(500).json({ error: 'upload_failed', details: err.message });
+      return res.json({ url: result.secure_url, publicId: result.public_id, width: result.width, height: result.height, format: result.format });
+    });
+    if (req.file.buffer) {
+      const pass = new PassThrough();
+      pass.end(req.file.buffer);
+      pass.pipe(stream);
+    } else if (req.file.path) {
+      // If using disk storage, stream file contents
+      const fs = require('fs');
+      const pass = new PassThrough();
+      fs.createReadStream(req.file.path).pipe(stream).on('close', () => { try { fs.unlinkSync(req.file.path); } catch {} });
+    } else {
+      return res.status(400).json({ error: 'no_buffer' });
+    }
+  } catch (e) {
+    console.error('cloudinary upload error', e);
+    res.status(500).json({ error: 'upload_failed' });
+  }
 }
 
 // ---- Points matrix helpers (configurable) ----
@@ -433,6 +465,8 @@ exports.getProductById = async (req, res) => {
       price: parsePrice(d.price),
       category: d.category || '',
       sellerId: d.sellerId || '',
+      sellerName: d.sellerName || d.seller || '',
+      owner: d.owner || null,
       status: d.status || 'pending',
       imageUrl: docImageUrl,
       imagePath: d.imagePath || null,

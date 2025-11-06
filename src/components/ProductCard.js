@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom';
 
 export default function ProductCard({ product, index }) {
   const navigate = useNavigate();
-  const primary = Array.isArray(product.photo) ? product.photo[0] : (product.photo || `https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=800&q=60`);
+  const primary = (product.imageUrl && String(product.imageUrl))
+    || (Array.isArray(product.photo) ? product.photo[0] : product.photo)
+    || `https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=800&q=60`;
   const [loadingNav, setLoadingNav] = useState(false);
   // Cart removed: primary action now just views the item
   // ...existing code...

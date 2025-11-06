@@ -5,6 +5,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import SearchIcon from './SearchIcon';
 import AuthModal from './AuthModal';
 import QuickMessagesButton from './QuickMessagesButton';
+import useUnreadMessages from './useUnreadMessages';
+import NotificationsPopover from './NotificationsPopover';
 
 export default function Navbar(){
   const [loading, setLoading] = useState(false);
@@ -15,9 +17,16 @@ export default function Navbar(){
   const [menuOpen, setMenuOpen] = useState(false)
   const user = JSON.parse(localStorage.getItem('user') || 'null')
   const ref = useRef()
+  const notifRef = useRef()
+  const { totalUnread, hasUnread } = useUnreadMessages();
+
+  const [notifOpen, setNotifOpen] = useState(false)
 
   useEffect(()=>{
-    function onDoc(e){ if(ref.current && !ref.current.contains(e.target)) setMenuOpen(false) }
+    function onDoc(e){
+      if(ref.current && !ref.current.contains(e.target)) setMenuOpen(false)
+      if(notifRef.current && !notifRef.current.contains(e.target)) setNotifOpen(false)
+    }
     document.addEventListener('click', onDoc)
     return ()=>document.removeEventListener('click', onDoc)
   },[])
@@ -73,17 +82,38 @@ export default function Navbar(){
               </div>
               {/* Shopping bag icon removed */}
               {/* Bell / Notifications icon */}
-              <button
-                onClick={(e)=>{ e.preventDefault(); navigate('/notifications'); }}
-                className="relative ml-3 cursor-pointer"
-                aria-label="Notifications"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" height="32" viewBox="0 -960 960 960" width="32" fill="#036c5f">
-                  <path d="M160-200v-60h80v-304q0-84 49.5-150.5T420-798v-22q0-25 17.5-42.5T480-880q25 0 42.5 17.5T540-820v22q81 17 130.5 83.5T720-564v304h80v60H160Zm320-302Zm0 422q-33 0-56.5-23.5T400-160h160q0 33-23.5 56.5T480-80ZM300-260h360v-304q0-75-52.5-127.5T480-744q-75 0-127.5 52.5T300-564v304Z"/>
-                </svg>
-                {/* optional unread badge placeholder (hidden by default) */}
-                {/* <span className="absolute -top-2 -right-2 inline-flex items-center justify-center w-4 h-4 text-xs bg-red-600 text-white rounded-full">3</span> */}
-              </button>
+              <div className="relative" ref={notifRef}>
+                <button
+                  onClick={(e)=>{ 
+                    e.preventDefault(); 
+                    if(!user){
+                      // prompt auth for logged-out users
+                      setModalType('login');
+                      setModalOpen(true);
+                      return;
+                    }
+                    setNotifOpen(v=>!v); 
+                  }}
+                  className="relative ml-3 cursor-pointer"
+                  type="button"
+                  aria-haspopup="true"
+                  aria-expanded={notifOpen ? 'true' : 'false'}
+                  aria-label="Notifications"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" height="32" viewBox="0 -960 960 960" width="32" fill="#036c5f">
+                    <path d="M160-200v-60h80v-304q0-84 49.5-150.5T420-798v-22q0-25 17.5-42.5T480-880q25 0 42.5 17.5T540-820v22q81 17 130.5 83.5T720-564v304h80v60H160Zm320-302Zm0 422q-33 0-56.5-23.5T400-160h160q0 33-23.5 56.5T480-80ZM300-260h360v-304q0-75-52.5-127.5T480-744q-75 0-127.5 52.5T300-564v304Z"/>
+                  </svg>
+                  {hasUnread && (
+                    <span
+                      className="absolute -top-2 -right-2 inline-flex items-center justify-center min-w-4 h-4 px-1 text-[10px] leading-none bg-red-600 text-white rounded-full"
+                      aria-label={`${totalUnread} unread messages`}
+                    >
+                      {totalUnread > 9 ? '9+' : totalUnread}
+                    </span>
+                  )}
+                </button>
+                <NotificationsPopover open={notifOpen} onClose={()=>setNotifOpen(false)} />
+              </div>
             </div>
           </form>
         )}

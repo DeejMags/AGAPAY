@@ -2,17 +2,35 @@
 import { db, storage, auth } from './firebase';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { collection, addDoc, query, where, getDocs, getDoc, doc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import authFetch from './utils/authFetch';
 
 // Sellers: Post a product with image upload
 export async function postProduct(productData, imageFile) {
   try {
     const user = auth.currentUser;
-    // Upload image to Storage; use provided sellerId where possible, else firebase user
-    const ownerId = productData.sellerId || (user && user.uid) || 'anonymous';
-    const imagePath = `products/${ownerId}/${imageFile.name}`;
-    const imageRef = ref(storage, imagePath);
-    await uploadBytes(imageRef, imageFile);
-    const downloadUrl = await getDownloadURL(imageRef);
+    let downloadUrl = null;
+    let imagePath = null;
+    if (imageFile) {
+      // Try Cloudinary via backend first
+      try {
+        const form = new FormData();
+        form.append('image', imageFile);
+        const res = await authFetch('/api/products/upload-image-cloudinary', { method: 'POST', body: form });
+        if (res.ok) {
+          const j = await res.json();
+          downloadUrl = j.url || null;
+        } else {
+          throw new Error('cloudinary_upload_failed');
+        }
+      } catch (e) {
+        // Fallback to Firebase Storage
+        const ownerId = productData.sellerId || (user && user.uid) || 'anonymous';
+        imagePath = `products/${ownerId}/${imageFile.name}`;
+        const imageRef = ref(storage, imagePath);
+        await uploadBytes(imageRef, imageFile);
+        downloadUrl = await getDownloadURL(imageRef);
+      }
+    }
 
     // Save product to Firestore; prefer provided sellerId/sellerName from productData
     const docRef = await addDoc(collection(db, 'products'), {
@@ -20,11 +38,12 @@ export async function postProduct(productData, imageFile) {
       status: productData.status || 'pending',
       imageUrl: downloadUrl,
       imagePath,
+      photo: downloadUrl || productData.photo || null,
       sellerId: productData.sellerId || (user && user.uid) || '',
       sellerName: productData.sellerName || (user && (user.displayName || '')) || '',
       createdAt: serverTimestamp(),
     });
-    return { id: docRef.id, ...productData, status: productData.status || 'pending', imageUrl: downloadUrl, imagePath, sellerId: productData.sellerId || (user && user.uid) || '' };
+    return { id: docRef.id, ...productData, status: productData.status || 'pending', imageUrl: downloadUrl, imagePath, photo: downloadUrl || null, sellerId: productData.sellerId || (user && user.uid) || '' };
   } catch (err) {
     console.error('Error posting product:', err);
     throw err;

@@ -174,10 +174,33 @@ function ProfileHeader({ me, onPicChange, menu }) {
 
     async function load() {
       setLoading(true);
+      // Snapshot auth user to enrich profile with displayName/email/photo
+      let authUser = null;
+      try {
+        const { auth } = await import('../firebase');
+        authUser = auth && auth.currentUser ? auth.currentUser : null;
+      } catch (e) { /* ignore */ }
+
       // 1) Resolve which user profile to show
       let profile = null;
       if (id) profile = await fetchUserByParam(id);
       else profile = await fetchCurrentUser();
+
+      // Merge auth details immediately to avoid rendering generic 'User' after refresh
+      if (authUser) {
+        const email = authUser.email || (profile && profile.email) || null;
+        const baseName = email ? String(email).split('@')[0] : undefined;
+        profile = {
+          ...profile,
+          authId: profile?.authId || authUser.uid,
+          email: profile?.email || authUser.email || null,
+          profilePic: profile?.profilePic || authUser.photoURL || undefined,
+          username: profile?.username || authUser.displayName || baseName || profile?.username,
+          displayName: profile?.displayName || authUser.displayName || baseName || profile?.displayName,
+          name: profile?.name || authUser.displayName || profile?.name,
+        };
+      }
+
       setUser(profile);
 
       // Best-effort enrichment to populate missing name/email without requiring a manual refresh

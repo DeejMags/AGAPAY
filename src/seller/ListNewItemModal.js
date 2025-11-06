@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import authFetch from '../utils/authFetch';
 import FullScreenLoader from '../components/FullScreenLoader';
+import { postProduct as postProductViaService } from '../firebaseProductService';
 
 export default function ListNewItemModal({ open, onClose, onAdd, editItem = null, onUpdate }) {
   const [form, setForm] = useState({ title: '', description: '', category: '', price: '', images: [] });
@@ -61,6 +62,23 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
       const payload = { ...form };
       // remove File objects for JSON body
       if (payload.images) delete payload.images;
+      // If user selected a new image during edit, upload to Cloudinary first
+      try {
+        if (form.images && form.images.length > 0 && form.images[0] instanceof File) {
+          const fd = new FormData();
+          fd.append('image', form.images[0]);
+          const up = await authFetch('/api/products/upload-image-cloudinary', { method: 'POST', body: fd });
+          if (up.ok) {
+            const j = await up.json();
+            if (j && j.url) {
+              payload.imageUrl = j.url;
+              payload.photo = j.url;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Cloudinary upload failed on edit, continuing without image change', err);
+      }
       try {
         const res = await authFetch(`/api/products/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         if (!res.ok) throw new Error('Backend update failed');
@@ -77,43 +95,57 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
         }
       }
     } else {
-      const newId = Date.now();
-      // Convert uploaded images to object URLs for display
-      let photo = [];
-      if (form.images && form.images.length > 0) {
-        photo = form.images.map(file => {
-          if (typeof file === 'string') return file;
-          return URL.createObjectURL(file);
-        });
-      }
-      // Get seller info from localStorage
+      // Create new product: upload first image to Cloudinary, then persist
       const seller = JSON.parse(localStorage.getItem('user') || '{}');
-      const newProduct = {
-        ...form,
-        id: newId,
-        _id: newId,
-        status: 'pending', // Mark as pending for admin approval
-        photo,
-        owner: seller.email || seller.username || 'Unknown',
-        sellerId: seller.id || null
-      };
-      onAdd(newProduct);
-      // Sanitize product payload to remove File objects before sending.
-      const sanitized = { ...newProduct };
-      if (sanitized.images) {
-        sanitized.images = sanitized.images.map(img => (typeof img === 'string' ? img : undefined)).filter(Boolean);
+      let imageUrl = null;
+      let firstFile = form.images && form.images.length > 0 ? form.images[0] : null;
+      // Try Cloudinary upload via backend
+      if (firstFile instanceof File) {
+        try {
+          const fd = new FormData();
+          fd.append('image', firstFile);
+          const up = await authFetch('/api/products/upload-image-cloudinary', { method: 'POST', body: fd });
+          if (up.ok) {
+            const j = await up.json();
+            imageUrl = j && j.url ? j.url : null;
+          }
+        } catch (e) {
+          console.warn('Cloudinary upload failed for create, will fallback if needed', e);
+        }
       }
 
+      const newId = Date.now();
+      const newProduct = {
+        title: form.title,
+        description: form.description,
+        category: form.category,
+        price: form.price,
+        status: 'pending',
+        photo: imageUrl ? [imageUrl] : [],
+        imageUrl: imageUrl || null,
+        owner: seller.email || seller.username || 'Unknown',
+        sellerId: seller.id || null,
+      };
+      onAdd(newProduct);
+
+      // Persist to backend (JSON; backend will use provided imageUrl)
       try {
-        const res = await authFetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sanitized) });
+        const res = await authFetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newProduct) });
         if (!res.ok) throw new Error('Backend create failed');
       } catch (err) {
+        // Fallback: use client service to upload (includes Storage fallback) and create Firestore doc
         try {
-          const { collection, addDoc } = await import('firebase/firestore');
-          const { db } = await import('../firebase');
-          await addDoc(collection(db, 'products'), sanitized);
+          await postProductViaService({
+            title: form.title,
+            description: form.description,
+            category: form.category,
+            price: form.price,
+            status: 'pending',
+            sellerId: seller.id || undefined,
+            sellerName: seller.name || seller.username || undefined,
+          }, firstFile instanceof File ? firstFile : undefined);
         } catch (e) {
-          console.warn('Failed to persist new product to backend and Firestore', e);
+          console.warn('Failed to persist new product via both backend and service', e);
         }
       }
     }
