@@ -411,7 +411,7 @@ exports.createProduct = async (req, res) => {
       createdAt,
     };
 
-    const ref = await db.collection('products').add(newProduct);
+  const ref = await db.collection('products').add(newProduct);
 
     const createdDoc = await ref.get();
     const createdData = createdDoc.data();
@@ -434,6 +434,19 @@ exports.createProduct = async (req, res) => {
       location: createdData.location || null,
       createdAt: createdData.createdAt && createdData.createdAt.toDate ? createdData.createdAt.toDate().toISOString() : null,
     };
+
+    // Notify admins about a new product submission for review
+    try {
+      const toList = (process.env.ADMIN_EMAILS || '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+      if (toList.length && typeof sendNotificationEmail === 'function') {
+        const subject = 'New product submitted for review';
+        const text = `${newProduct.sellerName || 'A seller'} submitted "${newProduct.title}" for approval.`;
+        await Promise.all(toList.map(email => sendNotificationEmail(email, subject, text, `<p>${text}</p>`)));
+      }
+    } catch (e) { console.warn('Admin notify for new product failed', e && e.message); }
 
     res.status(201).json(resp);
   } catch (err) {

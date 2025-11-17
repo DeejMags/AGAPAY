@@ -7,6 +7,7 @@ export default function Report() {
   const [error, setError] = React.useState('');
   const [lastUpdated, setLastUpdated] = React.useState(null);
   const [busyId, setBusyId] = React.useState(null);
+  const [previewUrl, setPreviewUrl] = React.useState('');
 
   async function load() {
     setLoading(true); setError('');
@@ -103,6 +104,7 @@ export default function Report() {
                 <th className="p-3 text-left">Reported user</th>
                 <th className="p-3 text-left">Reason</th>
                 <th className="p-3 text-left">Details</th>
+                <th className="p-3 text-left">Image</th>
                 <th className="p-3 text-left">Status</th>
                 <th className="p-3 text-left">Actions</th>
               </tr>
@@ -124,6 +126,13 @@ export default function Report() {
                     <td className="p-3">{m.reason || '—'}</td>
                     <td className="p-3 max-w-xs break-words whitespace-pre-wrap">{m.details || '—'}</td>
                     <td className="p-3">
+                      {m.imageUrl ? (
+                        <a href={m.imageUrl} target="_blank" rel="noreferrer" className="inline-block" title="Open in new tab">
+                          <img src={m.imageUrl} alt="report" className="w-24 h-16 object-cover rounded border" />
+                        </a>
+                      ) : '—'}
+                    </td>
+                    <td className="p-3">
                       <span className={`inline-block px-2 py-0.5 rounded text-xs ${isResolved ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
                         {m.status || 'open'}
                       </span>
@@ -133,6 +142,15 @@ export default function Report() {
                         <span className="text-gray-400 text-sm">No actions</span>
                       ) : (
                         <>
+                          {m.imageUrl && (
+                            <button
+                              className="px-2 py-1 bg-gray-200 rounded disabled:opacity-50 mr-1"
+                              disabled={busyId===m.id}
+                              onClick={() => setPreviewUrl(m.imageUrl)}
+                            >
+                              View image
+                            </button>
+                          )}
                           <button className="px-2 py-1 bg-green-200 rounded disabled:opacity-50" disabled={busyId===m.id} onClick={()=>setStatus(m.id, 'resolved')}>Resolved</button>
                           <button className="px-2 py-1 bg-red-600 text-white rounded disabled:opacity-50" disabled={busyId===m.id} onClick={()=>handleDelete(m.id)}>Delete</button>
                         </>
@@ -143,6 +161,18 @@ export default function Report() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+      {/* Simple image preview modal */}
+      {previewUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setPreviewUrl('')}>
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-[92%] p-3 relative" onClick={(e)=>e.stopPropagation()}>
+            <button className="absolute top-2 right-2 bg-white border rounded-full w-8 h-8" onClick={() => setPreviewUrl('')} aria-label="Close">×</button>
+            <div className="max-h-[80vh] overflow-auto flex items-center justify-center">
+              <img src={previewUrl} alt="report preview" className="max-w-full max-h-[78vh] object-contain" />
+            </div>
+            <div className="mt-2 text-sm text-gray-600 break-all"><a href={previewUrl} target="_blank" rel="noreferrer" className="text-teal-700 underline">Open original</a></div>
+          </div>
         </div>
       )}
     </div>

@@ -8,8 +8,6 @@ export default function MarkSoldModal({ open, onClose, product, onMarked }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [buyerId, setBuyerId] = useState('');
-  const [rating, setRating] = useState(5);
-  const [comment, setComment] = useState('');
   const [candidates, setCandidates] = useState([]); // [{ id, name }]
 
   const me = useMemo(() => (auth && auth.currentUser && auth.currentUser.uid) || null, []);
@@ -52,8 +50,6 @@ export default function MarkSoldModal({ open, onClose, product, onMarked }) {
     if (!open) {
       setError('');
       setBuyerId('');
-      setRating(5);
-      setComment('');
       setCandidates([]);
     }
   }, [open]);
@@ -74,26 +70,6 @@ export default function MarkSoldModal({ open, onClose, product, onMarked }) {
       });
       if (!res.ok) throw new Error('Failed to mark sold');
       const json = await res.json();
-
-      // write a review (best-effort) to Firestore
-      try {
-        const { db } = await import('../firebase');
-        const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
-        await addDoc(collection(db, 'reviews'), {
-          productId: product.id || product._id,
-          // canonical fields
-          reviewerId: me,
-          revieweeId: buyerId,
-          // backward/compat fields for existing UI
-          sellerId: me,
-          buyerId: buyerId,
-          rating: Number(rating) || 0,
-          comment: comment || '',
-          createdAt: serverTimestamp(),
-        });
-      } catch (e) {
-        // ignore review errors
-      }
 
       if (typeof onMarked === 'function') {
         onMarked({
@@ -131,18 +107,7 @@ export default function MarkSoldModal({ open, onClose, product, onMarked }) {
               ))}
             </select>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Rating</label>
-              <select className="w-full border rounded px-3 py-2" value={rating} onChange={e=>setRating(Number(e.target.value))}>
-                {[5,4,3,2,1].map(r => <option key={r} value={r}>{r} ⭐</option>)}
-              </select>
-            </div>
-            <div className="flex-[2]">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Short Review</label>
-              <input className="w-full border rounded px-3 py-2" placeholder="Great buyer!" value={comment} onChange={e=>setComment(e.target.value)} />
-            </div>
-          </div>
+          {/* Ratings are now provided by the buyer after purchase; sellers no longer rate buyers here. */}
 
           {error && <div className="text-sm text-red-600">{error}</div>}
 

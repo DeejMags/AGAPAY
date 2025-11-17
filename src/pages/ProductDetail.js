@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import FullScreenLoader from '../components/FullScreenLoader'
 import { useParams, useNavigate } from 'react-router-dom'
 import RatingStars from '../components/RatingStars'
+import MapEmbed from '../components/MapEmbed'
 import ProductCard from "../components/ProductCard";
 
 export default function ProductDetail(){
@@ -11,6 +12,9 @@ export default function ProductDetail(){
   // ...existing code...
   const [loading, setLoading] = useState(true)
   const [index, setIndex] = useState(0)
+  const [mapOpen, setMapOpen] = useState(false)
+  const [geoCoords, setGeoCoords] = useState(null)
+  const [geocoding, setGeocoding] = useState(false)
   const navigate = useNavigate()
   const [recommended, setRecommended] = useState([])
   function goBackToMarketplace(){
@@ -106,6 +110,41 @@ export default function ProductDetail(){
       }
     })()
   },[product])
+
+  // If product has a textual location but no numeric coords, try geocoding via Nominatim
+  useEffect(() => {
+    let mounted = true;
+    async function geocode() {
+      if (!product) return;
+      const hasLat = (typeof product.locationLat === 'number' && typeof product.locationLng === 'number');
+      if (hasLat) {
+        setGeoCoords(null);
+        setGeocoding(false);
+        return;
+      }
+      if (!product.location) return;
+      try {
+        setGeocoding(true);
+        const q = encodeURIComponent(product.location);
+        const url = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`;
+        const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+        if (!res.ok) throw new Error('Geocode failed');
+        const arr = await res.json();
+        if (mounted && Array.isArray(arr) && arr.length > 0) {
+          const lat = Number(arr[0].lat);
+          const lon = Number(arr[0].lon);
+          if (Number.isFinite(lat) && Number.isFinite(lon)) setGeoCoords({ lat, lng: lon });
+        }
+      } catch (e) {
+        // ignore geocoding errors
+        console.warn('Geocoding failed', e && e.message);
+      } finally {
+        if (mounted) setGeocoding(false);
+      }
+    }
+    geocode();
+    return () => { mounted = false; };
+  }, [product]);
 
   // Increment per-user view count for this product's category (no UI here)
   useEffect(() => {
@@ -205,7 +244,7 @@ export default function ProductDetail(){
         <div className="bg-gray-100 rounded overflow-hidden">
           {images.length > 1 ? (
             <div className="relative">
-              <img src={images[index]} alt={product.title} className="w-full h-64 sm:h-96 object-cover" />
+              <img src={images[index]} alt={product.title} className="w-full h-[520px] object-cover" />
               <button onClick={()=>setIndex(i=> Math.max(0,i-1))} className="absolute left-2 top-1/2 -translate-y-1/2 bg-white bg-opacity-80 p-2 rounded">‹</button>
               <button onClick={()=>setIndex(i=> Math.min(images.length-1,i+1))} className="absolute right-2 top-1/2 -translate-y-1/2 bg-white bg-opacity-80 p-2 rounded">›</button>
               <div className="flex gap-2 p-2 overflow-auto bg-white">
@@ -213,20 +252,26 @@ export default function ProductDetail(){
               </div>
             </div>
           ) : (
-            <img src={images[0] || 'https://via.placeholder.com/800x600?text=No+Image'} alt={product.title} className="w-full h-64 sm:h-96 object-cover" />
+            <img src={images[0] || 'https://via.placeholder.com/800x600?text=No+Image'} alt={product.title} className="w-full h-[520px] object-cover" />
           )}
         </div>
         <h1 className="text-2xl font-bold mt-4">{product.title || product.name || 'Product'}</h1>
         <div className="text-xl text-teal-600">\u20b1{product.price}</div>
   <div className="mt-3 text-gray-700">{product.desc || product.description}</div>
-  <div className="mt-2 text-sm text-gray-500">Category: {product.category} \u00b7 Location: {product.location}</div>
+  <div className="mt-2 text-sm text-gray-500">Category: {product.category} {product.location ? `· Location: ${product.location}` : ''}</div>
       </div>
       <aside className="md:col-span-1">
         <div className="p-4 border rounded">
           <div className="flex items-center gap-3">
-            <img src={seller?.profilePic || ''} alt={seller ? `${seller.username} profile` : 'Seller profile'} className="w-12 h-12 bg-gray-200 rounded-full object-cover" />
+            {seller?.profilePic ? (
+              <img src={seller.profilePic} alt={seller ? `${sellerDisplayName} profile` : 'Seller profile'} className="w-12 h-12 bg-gray-200 rounded-full object-cover" />
+            ) : (
+              <div className="w-12 h-12 rounded-full bg-teal-100 flex items-center justify-center text-teal-700 font-semibold">
+                {(sellerDisplayName || 'S').toString().trim().charAt(0).toUpperCase()}
+              </div>
+            )}
             <div>
-              <div className="font-semibold">{sellerDisplayName}</div>
+              <div className="font-semibold leading-tight">{sellerDisplayName}</div>
             </div>
           </div>
           {/* View Item removed on Product page as requested */}
@@ -240,6 +285,61 @@ export default function ProductDetail(){
           >
             View seller profile
           </button>
+
+          {/* Consolidated item location container placed directly under the View seller profile button */}
+          <div className="mt-4 border rounded-lg p-3 bg-white">
+            <h4 className="font-semibold mb-2">Item location</h4>
+
+            {/* If we have numeric coords (either stored on the product or discovered via geocoding), show a clickable thumbnail that opens the fullscreen map */}
+            {((typeof product.locationLat === 'number' && typeof product.locationLng === 'number') || geoCoords) ? (
+              <div className="w-full max-w-[300px] rounded-lg overflow-hidden border cursor-pointer" onClick={() => setMapOpen(true)}>
+                <MapEmbed
+                  lat={(typeof product.locationLat === 'number' && typeof product.locationLng === 'number') ? product.locationLat : geoCoords?.lat}
+                  lng={(typeof product.locationLat === 'number' && typeof product.locationLng === 'number') ? product.locationLng : geoCoords?.lng}
+                  height="190px"
+                  showLink={false}
+                />
+              </div>
+            ) : product.location ? (
+              /* Only textual location available: show the text and give a clear action to open in OSM */
+              <div className="text-sm text-gray-700">
+                <div className="break-words">{product.location}</div>
+                {geocoding ? (
+                  <span className="ml-2 text-xs text-gray-500">(locating...)</span>
+                ) : (
+                  <div className="mt-2">
+                    <a
+                      className="inline-block px-3 py-1 bg-teal-50 text-teal-700 border rounded hover:bg-teal-100"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      href={`https://www.openstreetmap.org/search?query=${encodeURIComponent(product.location)}`}
+                    >
+                      Open location in OpenStreetMap
+                    </a>
+                    {geoCoords && (
+                      <button onClick={() => setMapOpen(true)} className="ml-2 inline-block px-3 py-1 bg-teal-600 text-white rounded">View on map</button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-sm text-gray-500">No location provided</div>
+            )}
+          </div>
+
+          {/* Fullscreen map modal when mapOpen is true */}
+          {mapOpen && ((typeof product.locationLat === 'number' && typeof product.locationLng === 'number') || geoCoords) && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
+              <div className="bg-white rounded-lg shadow-lg w-[95%] max-w-4xl h-[88%] overflow-hidden relative">
+                <button className="absolute top-3 right-3 z-50 bg-white rounded-full p-2 shadow" onClick={() => setMapOpen(false)} aria-label="Close map">×</button>
+                <MapEmbed
+                  lat={(typeof product.locationLat === 'number' && typeof product.locationLng === 'number') ? product.locationLat : geoCoords?.lat}
+                  lng={(typeof product.locationLat === 'number' && typeof product.locationLng === 'number') ? product.locationLng : geoCoords?.lng}
+                  height="100%"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-4 p-4 border rounded">
@@ -258,6 +358,8 @@ export default function ProductDetail(){
           </div>
         </div>
       </aside>
+
+      {/* Map card removed: now shown inside the seller card above */}
 
       {recommended.length > 0 && (
         <div className="md:col-span-3 mt-6">

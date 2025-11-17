@@ -96,9 +96,44 @@ export default function Messages(){
     return null;
   }, [userCache, userNotFound]);
 
+  // Ensure a conversation has a reliable otherId and try to backfill its name/avatar
+  const ensureOtherParticipantAndName = useCallback(async (conv) => {
+    if (!conv || !conv.chatId) return;
+    let otherId = conv.otherId;
+    // If otherId is missing or is a legacy pseudo id, try to fetch conversation meta
+    if (!otherId || String(otherId).startsWith('seller_')) {
+      try {
+        const meta = await msgService.getConversationMeta(conv.chatId);
+        const meId = (auth && auth.currentUser && auth.currentUser.uid) || (JSON.parse(localStorage.getItem('user')||'null')?.id);
+        const parts = (meta && Array.isArray(meta.participants)) ? meta.participants.map(String) : [];
+        const resolvedOther = parts.find(p => String(p) !== String(meId));
+        if (resolvedOther) otherId = resolvedOther;
+      } catch (_) { /* ignore */ }
+    }
+    if (!otherId) return;
+    // Update conv with otherId if it changed
+    if (otherId && otherId !== conv.otherId) {
+      setConversations(prev => prev.map(c => c.chatId === conv.chatId ? { ...c, otherId } : c));
+    }
+    // If name is missing, resolve and update
+    const hasName = !!(conv.otherName && String(conv.otherName).trim() !== '');
+    if (!hasName) {
+      const u = await resolveUserProfile(otherId).catch(()=>null);
+      if (u) {
+        setConversations(prev => prev.map(c => c.chatId === conv.chatId ? { ...c, otherName: displayName(u), otherAvatar: u.profilePic || u.avatar || null } : c));
+      }
+    }
+  }, [resolveUserProfile]);
+
   function displayName(u) {
-    if (!u) return 'User';
-    return u.username || u.name || (u.email ? String(u.email).split('@')[0] : 'User');
+    if (!u) return '';
+    return (
+      u.username
+      || u.displayName
+      || u.name
+      || u.fullName
+      || (u.email ? String(u.email).split('@')[0] : '')
+    );
   }
 
   useEffect(()=>{
@@ -219,16 +254,11 @@ export default function Messages(){
   setConversations(uniqueOthers);
       }
 
-      // Asynchronously backfill missing names/avatars
+      // Asynchronously backfill participants and names/avatars per conversation
       try {
-        const uniqueOthers = Array.from(new Set(convs.map(c => c.otherId).filter(Boolean)));
-        for (const oid of uniqueOthers) {
-          if (!userCache[oid]) {
-            resolveUserProfile(oid).then(()=>{
-              // refresh list with updated names
-              setConversations(prev => prev.map(c => c.otherId === oid ? { ...c, otherName: displayName(userCache[oid] || null), otherAvatar: (userCache[oid]?.profilePic || userCache[oid]?.avatar || null) } : c));
-            }).catch(()=>{});
-          }
+        const targets = (convs || []).slice(0, 50); // sane cap
+        for (const c of targets) {
+          ensureOtherParticipantAndName(c);
         }
       } catch (e) { /* ignore */ }
 
@@ -260,15 +290,9 @@ export default function Messages(){
           const noDupIds = mapped.filter(c => c.chatId && !seen.has(c.chatId) && seen.add(c.chatId));
           const uniqueOthers = coalesceByOtherId(noDupIds);
           setConversations(uniqueOthers);
-          // backfill profiles
-          const uniqueList = Array.from(new Set(uniqueOthers.map(c => c.otherId).filter(Boolean)));
-          uniqueList.forEach(oid => {
-            if (!oid) return;
-            if (String(oid).startsWith('seller_')) return;
-            // Skip if we already have a name on any convo with this oid (reduces 404 spam)
-            const hasName = uniqueOthers.some(c => c.otherId === oid && c.otherName && c.otherName !== 'User');
-            if (hasName) return;
-            if (!userCache[oid] && !userNotFound[oid]) resolveUserProfile(oid).catch(()=>{});
+          // Backfill profiles/participants more aggressively
+          uniqueOthers.forEach(c => {
+            ensureOtherParticipantAndName(c);
           });
         })
       }
@@ -454,7 +478,9 @@ export default function Messages(){
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className={`font-semibold truncate ${selectedChat===c.chatId ? 'text-blue-700' : 'text-gray-800'}`}>{c.otherName || 'User'}</div>
+                  <div className={`font-semibold truncate ${selectedChat===c.chatId ? 'text-blue-700' : 'text-gray-800'}`}>
+                    {c.otherName || displayName(userCache[c.otherId]) || 'Loading…'}
+                  </div>
                   <div className="text-xs text-gray-500 truncate">
                     {(() => {
                       const meId = (auth && auth.currentUser && auth.currentUser.uid) || (JSON.parse(localStorage.getItem('user')||'null')?.id);
@@ -492,7 +518,13 @@ export default function Messages(){
                   <div className="w-12 h-12 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center">
                     {/* avatar placeholder - could resolve other user's avatar */}
                   </div>
-                  <div className="font-semibold text-lg">{conversations.find(x=>x.chatId===selectedChat)?.otherName || 'Chat'}</div>
+                  <div className="font-semibold text-lg">
+                    {(() => {
+                      const conv = conversations.find(x => x.chatId === selectedChat);
+                      const nm = conv?.otherName || displayName(userCache[conv?.otherId]) || '';
+                      return nm || 'Chat';
+                    })()}
+                  </div>
                 </div>
                 <div className="text-xs text-gray-500">Messages</div>
               </div>

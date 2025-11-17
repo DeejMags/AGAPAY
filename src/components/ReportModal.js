@@ -4,6 +4,7 @@ import authFetch from '../utils/authFetch';
 export default function ReportModal({ open, onClose, reportedUser, onSubmitted }) {
   const [reason, setReason] = useState('Spam');
   const [details, setDetails] = useState('');
+  const [imageFile, setImageFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
@@ -14,15 +15,15 @@ export default function ReportModal({ open, onClose, reportedUser, onSubmitted }
     setSubmitting(true);
     setError('');
     try {
-      const body = {
-        reportedUserId: reportedUser?.id || reportedUser?._id || reportedUser?.authId || null,
-        reportedUserEmail: reportedUser?.email || null,
-        reportedUserName: reportedUser?.username || reportedUser?.name || null,
-        reason,
-        details,
-        context: { page: 'profile', profileId: reportedUser?.id || null }
-      };
-      const res = await authFetch('/api/reports', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const fd = new FormData();
+      fd.append('reportedUserId', reportedUser?.id || reportedUser?._id || reportedUser?.authId || '');
+      fd.append('reportedUserEmail', reportedUser?.email || '');
+      fd.append('reportedUserName', reportedUser?.username || reportedUser?.name || '');
+      fd.append('reason', reason || '');
+      fd.append('details', details || '');
+      fd.append('context', JSON.stringify({ page: 'profile', profileId: reportedUser?.id || null }));
+      if (imageFile) fd.append('image', imageFile);
+      const res = await authFetch('/api/reports', { method: 'POST', body: fd });
       if (!res.ok) throw new Error('Report failed');
       const json = await res.json();
       onSubmitted && onSubmitted(json);
@@ -60,6 +61,13 @@ export default function ReportModal({ open, onClose, reportedUser, onSubmitted }
           </select>
           <label className="text-sm font-medium">Details</label>
           <textarea value={details} onChange={e=>setDetails(e.target.value)} className="border rounded px-3 py-2" rows={4} placeholder="Describe the issue..." />
+          <label className="text-sm font-medium">Attach image (optional)</label>
+          <input type="file" accept="image/*" onChange={e=> setImageFile((e.target.files && e.target.files[0]) || null)} />
+          {imageFile && (
+            <div className="mt-1">
+              <img src={URL.createObjectURL(imageFile)} alt="preview" className="w-40 h-28 object-cover rounded" />
+            </div>
+          )}
           {error && <div className="text-red-600 text-sm">{error}</div>}
           <div className="flex justify-end gap-2 mt-2">
             <button type="button" className="px-4 py-2 rounded bg-gray-200" onClick={onClose} disabled={submitting}>Cancel</button>

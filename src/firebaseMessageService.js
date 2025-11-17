@@ -267,7 +267,7 @@ export function subscribeToUserConversations(userId, callback) {
       const lm = raw.lastMessage || null;
       const lastMessage = lm ? { id: lm.id || null, text: lm.text || lm.message || '', senderId: lm.senderId || lm.sender || null, createdAt: Number(lm.createdAtMs || 0) || millisFromTs(lm.createdAt) } : null;
       // Prefer client-stamped ms for immediate ordering to avoid serverTimestamp delay
-      const lastMessageAt = Number(lm && lm.createdAtMs || 0) || millisFromTs(raw.lastMessageAt || raw.updatedAt);
+  const lastMessageAt = Number((lm && lm.createdAtMs) || 0) || millisFromTs(raw.lastMessageAt || raw.updatedAt);
       return { conversationId: d.id, participants, lastMessage, lastMessageAt, unreadCount, unreadMap: raw.unread || {}, productId: raw.productId || null, title: raw.title || raw.productName || null };
     });
     list.sort((a,b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));

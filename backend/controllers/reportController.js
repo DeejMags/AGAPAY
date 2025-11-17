@@ -1,4 +1,37 @@
 const { admin, db } = require('../config/firebaseAdmin');
+const cloudinary = require('../config/cloudinary');
+const nodemailer = require('nodemailer');
+
+// Create a nodemailer transporter if SMTP env vars are present
+let transporter = null;
+if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+  transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT) || 587,
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+  });
+}
+
+async function notifyAdmins(subject, text, html) {
+  const toList = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  if (!toList.length || !transporter) {
+    console.log('Admin notify skipped', { subject, toList: toList.length });
+    return;
+  }
+  try {
+    await transporter.sendMail({
+      from: process.env.FROM_EMAIL || process.env.SMTP_USER,
+      to: toList.join(','),
+      subject,
+      text,
+      html: html || `<p>${text}</p>`,
+    });
+  } catch (e) { console.warn('notifyAdmins failed', e && e.message); }
+}
 
 function isAdminUser(user) {
   // Dev bypass when Firebase is disabled or auth skipped in dev
@@ -47,9 +80,40 @@ exports.createReport = async (req, res) => {
       updatedAt: stamp,
     };
 
+    // Optional image upload via Cloudinary
+    if (req.file && cloudinary && process.env.CLOUDINARY_CLOUD_NAME) {
+      try {
+        const folder = process.env.CLOUDINARY_FOLDER || 'agapay';
+        const opts = { folder: `${folder}/reports`, resource_type: 'image', overwrite: false, transformation: [{ quality: 'auto', fetch_format: 'auto' }] };
+        const { PassThrough } = require('stream');
+        const result = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(opts, (err, res) => err ? reject(err) : resolve(res));
+          const pass = new PassThrough();
+          pass.end(req.file.buffer);
+          pass.pipe(stream);
+        });
+        payload.imageUrl = result.secure_url;
+        payload.imagePublicId = result.public_id;
+        payload.imageWidth = result.width;
+        payload.imageHeight = result.height;
+        payload.imageFormat = result.format;
+      } catch (e) {
+        console.warn('report image upload failed', e && e.message);
+      }
+    } else if (req.body && req.body.imageUrl) {
+      // Allow direct URL fallback
+      payload.imageUrl = req.body.imageUrl;
+    }
+
     const ref = await db.collection('reports').add(payload);
     const snap = await ref.get();
     const data = snap.data() || {};
+
+    // Notify admins
+    const subject = 'New user report submitted';
+    const text = `A report was filed by ${payload.reporterEmail || payload.reporterId || 'Unknown'} about ${payload.reportedUserEmail || payload.reportedUserId || 'a user'} for ${payload.reason || 'unspecified reason'}.`;
+    notifyAdmins(subject, text, `<p>${text}</p>${payload.imageUrl ? `<p><a href="${payload.imageUrl}">View image</a></p>` : ''}`).catch(()=>{});
+
     res.status(201).json({ id: ref.id, ...data });
   } catch (e) {
     console.error('createReport error', e);

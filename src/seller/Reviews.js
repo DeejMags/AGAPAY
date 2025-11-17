@@ -6,11 +6,11 @@ import { useNavigate } from 'react-router-dom';
 export default function Reviews() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [orders, setOrders] = useState([]); // list of sold items with buyer info
-  const [ratings, setRatings] = useState({}); // buyerId -> { rating, comment }
-  const [myReviews, setMyReviews] = useState([]); // existing reviews authored by me
-  const [reviewMap, setReviewMap] = useState({}); // key: `${productId}_${buyerId}` => review
-  const [buyers, setBuyers] = useState({}); // buyerId -> { name, email }
+  const [orders, setOrders] = useState([]); // list of purchased items with seller info
+  const [ratings, setRatings] = useState({}); // productId -> { rating, comment }
+  const [myReviews, setMyReviews] = useState([]); // existing reviews authored by me (as buyer)
+  const [reviewMap, setReviewMap] = useState({}); // key: `${productId}_${sellerId}` => review
+  const [sellers, setSellers] = useState({}); // sellerId -> { name, email }
 
   // Sidebar nav button classes (matches SellerDashboard look & feel)
   const navBtn = useMemo(() => (activeKey, currentKey = 'reviews') => {
@@ -35,29 +35,29 @@ export default function Reviews() {
         // Try backend endpoint if available in future; for now pull from products/transactions in Firestore fallback below
       } catch (e) {}
 
-    // Firestore: find seller's sold products and load existing reviews
+    // Firestore: find buyer's purchased products and load existing reviews
       try {
   const { db } = await import('../firebase');
   const { collection, getDocs, query, where } = await import('firebase/firestore');
         const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
         if (!uid) { setOrders([]); setLoading(false); return; }
-        const q = query(collection(db, 'products'), where('sellerId', '==', uid));
+        const q = query(collection(db, 'products'), where('buyerId', '==', uid));
         const snap = await getDocs(q);
         const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         // Filter to sold/completed/delivered
         const sold = all.filter(p => isSoldStatus(p.status));
-        // Map to order-like objects; replace this with real buyer data when your Orders schema exists
+        // Map to order-like objects; include seller information
         const enriched = sold.map(p => ({
           id: p.id,
           productName: p.title || p.name || p.productName || 'Item',
-          buyerId: p.buyerId || null,
-          buyerName: p.buyerName || (p.buyerEmail ? p.buyerEmail.split('@')[0] : null) || 'Buyer',
+          sellerId: p.sellerId || null,
+          sellerName: p.sellerName || (p.owner ? String(p.owner).split('@')[0] : null) || 'Seller',
           soldAt: p.soldAt || p.updatedAt || p.createdAt || Date.now(),
         }));
         if (!cancelled) setOrders(enriched);
 
-        // Load my existing reviews (support both field names)
-        const r1 = await getDocs(query(collection(db, 'reviews'), where('sellerId', '==', uid)));
+        // Load my existing reviews (as buyer)
+        const r1 = await getDocs(query(collection(db, 'reviews'), where('buyerId', '==', uid)));
         const r2 = await getDocs(query(collection(db, 'reviews'), where('reviewerId', '==', uid)));
         const combined = [...r1.docs, ...r2.docs].reduce((arr, d) => {
           // de-dupe by doc id
@@ -70,19 +70,19 @@ export default function Reviews() {
         const map = {};
         for (const r of reviews) {
           const productId = r.productId || r.itemId;
-          const buyerId = r.buyerId || r.revieweeId;
-          if (productId && buyerId) map[`${productId}_${buyerId}`] = r;
+          const sellerId = r.sellerId || r.revieweeId;
+          if (productId && sellerId) map[`${productId}_${sellerId}`] = r;
         }
         if (!cancelled) setReviewMap(map);
 
-        // Fetch buyer profiles (from orders and reviews) to show real names
-        const buyerIds = Array.from(new Set([
-          ...enriched.map(o => o.buyerId).filter(Boolean),
-          ...reviews.map(r => r.buyerId || r.revieweeId).filter(Boolean)
+        // Fetch seller profiles (from orders and reviews) to show real names
+        const sellerIds = Array.from(new Set([
+          ...enriched.map(o => o.sellerId).filter(Boolean),
+          ...reviews.map(r => r.sellerId || r.revieweeId).filter(Boolean)
         ]));
-        if (buyerIds.length > 0) {
+        if (sellerIds.length > 0) {
           const results = {};
-          await Promise.all(buyerIds.map(async (id) => {
+          await Promise.all(sellerIds.map(async (id) => {
             // Try backend profile lookup first
             try {
               const res = await authFetch(`/api/users/${id}`);
@@ -110,7 +110,7 @@ export default function Reviews() {
               results[id] = { name: id, email: null };
             }
           }));
-          if (!cancelled) setBuyers(results);
+          if (!cancelled) setSellers(results);
         }
       } catch (e) {
         if (!cancelled) setOrders([]);
@@ -129,28 +129,28 @@ export default function Reviews() {
   }
 
   async function submitReview(order) {
-    const data = ratings[order.buyerId || order.id];
+    const data = ratings[order.id];
     if (!data || !data.rating) return;
     try {
       const { db } = await import('../firebase');
       const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
       const review = {
-        sellerId: auth.currentUser.uid,
-        buyerId: order.buyerId || null,
+        sellerId: order.sellerId || null,
+        buyerId: auth.currentUser.uid,
         productId: order.id,
         rating: Number(data.rating),
         comment: data.comment || '',
         createdAt: serverTimestamp(),
         // canonical fields too
         reviewerId: auth.currentUser.uid,
-        revieweeId: order.buyerId || null,
+        revieweeId: order.sellerId || null,
       };
       const docRef = await addDoc(collection(db, 'reviews'), review);
       // Clear local input
-      setRatings(prev => ({ ...prev, [order.buyerId || order.id]: { rating: '', comment: '' } }));
+      setRatings(prev => ({ ...prev, [order.id]: { rating: '', comment: '' } }));
       const newRev = { id: docRef.id, ...review };
       setMyReviews(prev => [newRev, ...prev]);
-      setReviewMap(prev => ({ ...prev, [`${order.id}_${order.buyerId}`]: newRev }));
+      setReviewMap(prev => ({ ...prev, [`${order.id}_${order.sellerId}`]: newRev }));
     } catch (e) {
       console.error('Failed to submit review', e);
       alert('Failed to submit review');
@@ -231,11 +231,11 @@ export default function Reviews() {
       {/* Main content */}
       <main className="flex-1 p-8">
         <div className="bg-white rounded-2xl shadow p-6">
-          <h3 className="text-xl font-bold mb-4">Buyer Reviews</h3>
+          <h3 className="text-xl font-bold mb-4">Review Your Purchases</h3>
           {/* Past reviews */}
           {myReviews.length > 0 && (
             <div className="mb-8">
-              <div className="text-sm font-semibold text-gray-700 mb-2">Your Past Reviews</div>
+              <div className="text-sm font-semibold text-gray-700 mb-2">Your Past Reviews (as Buyer)</div>
               <div className="grid gap-3">
                 {myReviews.slice(0, 20).map(r => (
                   <div key={r.id} className="p-3 border rounded-lg bg-gray-50">
@@ -243,11 +243,11 @@ export default function Reviews() {
                       <div className="text-sm">
                         <span className="font-medium">{(orders.find(o => o.id === r.productId)?.productName) || 'Item'}</span>
                         <span className="mx-2 text-gray-400">•</span>
-                        <span className="text-gray-600">Buyer: {(() => {
-                          const bid = r.revieweeId || r.buyerId;
-                          if (bid && buyers[bid]?.name) return buyers[bid].name;
+                        <span className="text-gray-600">Seller: {(() => {
+                          const sid = r.revieweeId || r.sellerId;
+                          if (sid && sellers[sid]?.name) return sellers[sid].name;
                           const o = orders.find(o => o.id === r.productId);
-                          return (o && (buyers[o.buyerId]?.name || o.buyerName)) || bid || '—';
+                          return (o && (sellers[o.sellerId]?.name || o.sellerName)) || sid || '—';
                         })()}</span>
                       </div>
                       <div className="text-amber-600 font-semibold">{Number(r.rating) || 0} ★</div>
@@ -261,11 +261,11 @@ export default function Reviews() {
           {loading ? (
             <div className="text-gray-500">Loading…</div>
           ) : orders.length === 0 ? (
-            <div className="text-gray-500">No sold items yet.</div>
+            <div className="text-gray-500">No purchases yet.</div>
           ) : (
             <div className="space-y-4">
               {orders.map(order => {
-                const key = `${order.id}_${order.buyerId}`;
+                const key = `${order.id}_${order.sellerId}`;
                 const existing = reviewMap[key];
                 return (
                 <div key={order.id} className="p-4 border rounded-xl">
@@ -275,8 +275,8 @@ export default function Reviews() {
                       <div className="font-semibold">{order.productName}</div>
                     </div>
                     <div className="text-right">
-                      <div className="text-sm text-gray-500">Buyer</div>
-                      <div className="font-medium">{buyers[order.buyerId]?.name || order.buyerName}</div>
+                      <div className="text-sm text-gray-500">Seller</div>
+                      <div className="font-medium">{sellers[order.sellerId]?.name || order.sellerName}</div>
                     </div>
                   </div>
                   {!existing ? (
@@ -286,8 +286,8 @@ export default function Reviews() {
                           <label className="block text-xs text-gray-600 mb-1">Rating</label>
                           <select
                             className="border rounded px-2 py-1 w-full"
-                            value={(ratings[order.buyerId || order.id]?.rating) || ''}
-                            onChange={e => setRatings(prev => ({ ...prev, [order.buyerId || order.id]: { ...(prev[order.buyerId || order.id] || {}), rating: e.target.value } }))}
+                            value={(ratings[order.id]?.rating) || ''}
+                            onChange={e => setRatings(prev => ({ ...prev, [order.id]: { ...(prev[order.id] || {}), rating: e.target.value } }))}
                           >
                             <option value="">Select</option>
                             {[5,4,3,2,1].map(n => <option key={n} value={n}>{n} ★</option>)}
@@ -297,9 +297,9 @@ export default function Reviews() {
                           <label className="block text-xs text-gray-600 mb-1">Comment (optional)</label>
                           <input
                             className="border rounded px-2 py-1 w-full"
-                            placeholder="Leave a note for the buyer…"
-                            value={(ratings[order.buyerId || order.id]?.comment) || ''}
-                            onChange={e => setRatings(prev => ({ ...prev, [order.buyerId || order.id]: { ...(prev[order.buyerId || order.id] || {}), comment: e.target.value } }))}
+                            placeholder="Share your experience with the seller…"
+                            value={(ratings[order.id]?.comment) || ''}
+                            onChange={e => setRatings(prev => ({ ...prev, [order.id]: { ...(prev[order.id] || {}), comment: e.target.value } }))}
                           />
                         </div>
                       </div>
@@ -307,7 +307,7 @@ export default function Reviews() {
                         <button
                           className="px-4 py-2 bg-teal-600 text-white rounded"
                           onClick={() => submitReview(order)}
-                          disabled={!ratings[order.buyerId || order.id]?.rating}
+                          disabled={!ratings[order.id]?.rating}
                         >Submit Review</button>
                       </div>
                     </>

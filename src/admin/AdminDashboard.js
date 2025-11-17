@@ -21,6 +21,7 @@ const initialPoints = [];
 
 export default function AdminDashboard() {
   const [activePage, setActivePage] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [users, setUsers] = useState(initialUsers);
   const [products, setProducts] = useState([]);
   React.useEffect(() => {
@@ -156,8 +157,43 @@ export default function AdminDashboard() {
   // Responsive layout
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-teal-100 via-white to-gray-100 ml-[-12px] sm:ml-[-16px]">
-  <Sidebar activePage={activePage} setActivePage={setActivePage} />
-      <div className="flex-1 flex flex-col">
+      {/* Mobile hamburger */}
+      <button
+        type="button"
+        className="md:hidden fixed top-3 left-3 z-50 rounded-md bg-white/90 border border-gray-200 p-2 shadow"
+        aria-label="Open menu"
+        onClick={() => setSidebarOpen(true)}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="#036c5f"><path d="M3 6h18v2H3V6Zm0 5h18v2H3v-2Zm0 5h18v2H3v-2Z"/></svg>
+      </button>
+
+      {/* Desktop sidebar */}
+      <div className="hidden md:block">
+        <Sidebar activePage={activePage} setActivePage={setActivePage} className="h-screen sticky top-0" />
+      </div>
+
+      {/* Mobile drawer */}
+      {sidebarOpen && (
+        <div className="md:hidden fixed inset-0 z-40">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setSidebarOpen(false)} />
+          <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl">
+            <div className="flex items-center justify-between px-3 py-3 border-b">
+              <div className="font-semibold text-teal-700">Menu</div>
+              <button
+                type="button"
+                aria-label="Close menu"
+                className="rounded p-1 hover:bg-gray-100"
+                onClick={() => setSidebarOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <Sidebar activePage={activePage} setActivePage={(k)=>{ setActivePage(k); setSidebarOpen(false); }} className="h-[calc(100%-48px)] overflow-y-auto" />
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 flex flex-col w-full">
         {/* Tighter paddings to remove excessive gaps */}
         <main className="flex-1 p-3 sm:p-4 md:p-6">
           {/* Render pages directly; individual pages provide their own containers */}

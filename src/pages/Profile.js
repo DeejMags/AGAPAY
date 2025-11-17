@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import RatingStars from '../components/RatingStars'
+import MapEmbed from '../components/MapEmbed'
 import ProductCard from '../components/ProductCard'
 import authFetch from '../utils/authFetch'
 import FullScreenLoader from '../components/FullScreenLoader'
@@ -294,8 +295,33 @@ function ProfileHeader({ me, onPicChange, menu }) {
         <div className="flex-1">
           <h3 className="font-semibold">{id ? `${(user.username || user.name || user.displayName || user.fullName || (user.email ? String(user.email).split('@')[0] : 'Seller'))}'s listings` : 'My listings'}</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
-            {myProducts.length ? myProducts.map(p=> <ProductCard key={p._id || p.id} product={p} />) : <div className="p-4 border rounded">No listings yet.</div>}
-          </div>
+                {myProducts.length ? myProducts.map(p=> <ProductCard key={p._id || p.id} product={p} />) : <div className="p-4 border rounded">No listings yet.</div>}
+              </div>
+          {/* Seller location map: show user's own location if available, otherwise show first product location */}
+          {(() => {
+            // Determine a representative lat/lng to show
+            const userLat = user && (user.locationLat !== undefined ? Number(user.locationLat) : (user.lat !== undefined ? Number(user.lat) : undefined));
+            const userLng = user && (user.locationLng !== undefined ? Number(user.locationLng) : (user.lng !== undefined ? Number(user.lng) : undefined));
+            let mapLat = null, mapLng = null;
+            if (typeof userLat === 'number' && typeof userLng === 'number') {
+              mapLat = userLat; mapLng = userLng;
+            } else {
+              // look for first product with coords
+              const withCoords = myProducts.find(pp => (pp.locationLat !== undefined && pp.locationLng !== undefined && pp.locationLat !== null && pp.locationLng !== null));
+              if (withCoords) { mapLat = Number(withCoords.locationLat); mapLng = Number(withCoords.locationLng); }
+            }
+            if (mapLat && mapLng) {
+              return (
+                <div className="mt-6">
+                  <h4 className="font-semibold mb-2">Seller location</h4>
+                  <div className="border rounded overflow-hidden" style={{ height: 300 }}>
+                    <MapEmbed lat={mapLat} lng={mapLng} height="300px" />
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          })()}
         </div>
       </div>
       {/* Report modal */}

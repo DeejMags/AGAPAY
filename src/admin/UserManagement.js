@@ -21,8 +21,9 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
   // Helper to consistently compute a user's display name
   const getDisplayName = (u) => {
     if (!u) return '';
-    // Prefer explicit name fields; fall back to email prefix to avoid blank names
-    const name = u.username || u.name || u.displayName || u.fullName || (u.email ? String(u.email).split('@')[0] : '');
+    // Prefer explicit name fields; include first/last name support
+    const combined = [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
+    const name = combined || u.username || u.name || u.displayName || u.fullName || (u.email ? String(u.email).split('@')[0] : '');
     return name;
   };
 

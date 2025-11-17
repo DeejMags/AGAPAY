@@ -6,9 +6,9 @@ const navItems = [
   { key: 'report', label: 'Report', icon: '❗' },
   { key: 'settings', label: 'Settings', icon: '⚙️' },
 ];
-export default function Sidebar({ activePage, setActivePage }) {
+export default function Sidebar({ activePage, setActivePage, className = '' }) {
   return (
-    <aside className="w-64 bg-white shadow-lg flex flex-col py-5 px-3 border-r border-teal-100">
+    <aside className={`w-64 bg-white shadow-lg flex flex-col py-5 px-3 border-r border-teal-100 ${className}`}>
       <nav className="flex-1">
         {navItems.map(item => (
           <button

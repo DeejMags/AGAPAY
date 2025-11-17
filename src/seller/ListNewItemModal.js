@@ -4,7 +4,7 @@ import FullScreenLoader from '../components/FullScreenLoader';
 import { postProduct as postProductViaService } from '../firebaseProductService';
 
 export default function ListNewItemModal({ open, onClose, onAdd, editItem = null, onUpdate }) {
-  const [form, setForm] = useState({ title: '', description: '', category: '', price: '', images: [] });
+  const [form, setForm] = useState({ title: '', description: '', category: '', price: '', location: '', locationLat: '', locationLng: '', images: [] });
   const categories = [
     'Clothing',
     'Electronics',
@@ -27,6 +27,9 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
         description: editItem.description || '',
         category: editItem.category || '',
         price: editItem.price ?? '',
+        location: editItem.location || '',
+        locationLat: (typeof editItem.locationLat === 'number' ? String(editItem.locationLat) : ''),
+        locationLng: (typeof editItem.locationLng === 'number' ? String(editItem.locationLng) : ''),
         images: [],
       });
       // If existing image is available, show as preview
@@ -36,7 +39,7 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
       setImgPreview(previews);
     }
     if (open && !editItem) {
-      setForm({ title: '', description: '', category: '', price: '', images: [] });
+      setForm({ title: '', description: '', category: '', price: '', location: '', locationLat: '', locationLng: '', images: [] });
       setImgPreview([]);
     }
   }, [open, editItem]);
@@ -114,7 +117,6 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
         }
       }
 
-      const newId = Date.now();
       const newProduct = {
         title: form.title,
         description: form.description,
@@ -125,17 +127,24 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
         imageUrl: imageUrl || null,
         owner: seller.email || seller.username || 'Unknown',
         sellerId: seller.id || null,
+        location: form.location || null,
+        locationLat: form.locationLat ? Number(form.locationLat) : undefined,
+        locationLng: form.locationLng ? Number(form.locationLng) : undefined,
       };
-      onAdd(newProduct);
-
-      // Persist to backend (JSON; backend will use provided imageUrl)
+      // Persist to backend (JSON; backend will use provided imageUrl). Call onAdd only after persistence succeeds
+      let createdObj = null;
       try {
         const res = await authFetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newProduct) });
-        if (!res.ok) throw new Error('Backend create failed');
+        if (res.ok) {
+          // backend returns created product summary
+          try { createdObj = await res.json(); } catch (e) { createdObj = null; }
+        } else {
+          throw new Error('Backend create failed');
+        }
       } catch (err) {
         // Fallback: use client service to upload (includes Storage fallback) and create Firestore doc
         try {
-          await postProductViaService({
+          const svcRes = await postProductViaService({
             title: form.title,
             description: form.description,
             category: form.category,
@@ -143,14 +152,30 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
             status: 'pending',
             sellerId: seller.id || undefined,
             sellerName: seller.name || seller.username || undefined,
+            location: form.location || null,
+            locationLat: form.locationLat ? Number(form.locationLat) : undefined,
+            locationLng: form.locationLng ? Number(form.locationLng) : undefined,
           }, firstFile instanceof File ? firstFile : undefined);
+          createdObj = svcRes || null;
         } catch (e) {
           console.warn('Failed to persist new product via both backend and service', e);
         }
       }
+
+      // If persistence succeeded, notify parent via onAdd so seller UI updates,
+      // and dispatch a global event so admin or other parts can refresh in real-time.
+      if (createdObj) {
+        try { onAdd && onAdd(createdObj); } catch (e) { console.warn('onAdd handler failed', e); }
+        try {
+          // Dispatch a window event so admin/product lists can react immediately
+          if (typeof window !== 'undefined' && window.dispatchEvent) {
+            window.dispatchEvent(new CustomEvent('product-created', { detail: createdObj }));
+          }
+        } catch (e) { console.warn('Failed to dispatch product-created event', e); }
+      }
     }
     setIsSaving(false);
-    setForm({ title: '', description: '', category: '', price: '', images: [] });
+    setForm({ title: '', description: '', category: '', price: '', location: '', locationLat: '', locationLng: '', images: [] });
     setImgPreview([]);
     onClose();
   }
@@ -171,6 +196,15 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
             ))}
           </select>
           <input name="price" type="number" value={form.price} onChange={handleChange} placeholder="Price" className="border rounded p-2" required disabled={isSaving} />
+          <input name="location" value={form.location} onChange={handleChange} placeholder="Location (e.g. Baguio City)" className="border rounded p-2" disabled={isSaving} />
+          <button type="button" className="text-xs text-teal-600 underline self-start" disabled={isSaving} onClick={async ()=>{
+            if (!navigator.geolocation) return;
+            try {
+              const pos = await new Promise((res, rej)=> navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 8000 }));
+              const { latitude, longitude } = pos.coords;
+              setForm(f=> ({ ...f, locationLat: latitude.toFixed(6), locationLng: longitude.toFixed(6) }));
+            } catch (e) { console.warn('Geo lookup failed', e); }
+          }}>Use current location</button>
           <input name="images" type="file" multiple accept="image/*" onChange={handleImage} className="border rounded p-2" disabled={isSaving} />
           {imgPreview.length > 0 && (
             <div className="flex gap-2 mt-2">{imgPreview.map((src, i) => <img key={i} src={src} alt="preview" className="w-12 h-12 sm:w-16 sm:h-16 object-cover rounded" />)}</div>

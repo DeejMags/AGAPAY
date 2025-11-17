@@ -183,6 +183,7 @@ export default function ProductManagement({ products: parentProducts = null, set
                 <th className="p-3 text-left">Created</th>
                 <th className="p-3 text-left">Status</th>
                 <th className="p-3 text-left">Owner</th>
+                <th className="p-3 text-left">Location</th>
                 <th className="p-3 text-left">Actions</th>
               </tr>
             </thead>
@@ -203,6 +204,7 @@ export default function ProductManagement({ products: parentProducts = null, set
                   <td className="p-3">{p.createdAt ? new Date(p.createdAt).toLocaleString() : '—'}</td>
                   <td className="p-3">{p.status}</td>
                   <td className="p-3">{p.sellerName || p.sellerDisplayName || (p.sellerEmail ? String(p.sellerEmail).split('@')[0] : '') || p.sellerId || 'Unknown'}</td>
+                  <td className="p-3 text-xs">{p.location ? p.location : ((p.locationLat !== undefined && p.locationLng !== undefined && p.locationLat !== null && p.locationLng !== null) ? `${(Number(p.locationLat)).toFixed ? Number(p.locationLat).toFixed(4) : p.locationLat}, ${(Number(p.locationLng)).toFixed ? Number(p.locationLng).toFixed(4) : p.locationLng}` : '—')}</td>
                   <td className="p-3 flex gap-2 flex-wrap">
                     {/* If item is sold, do not render any action buttons */}
                     {((p.status || '').toString().toLowerCase() === 'sold') ? (

@@ -9,11 +9,71 @@ export default function ImpactReportPanel() {
   const [goals] = useState({ sold: 20, points: 2000 }); // add points goal for UI only
   const unsubRef = useRef(null);
   const userUnsubRef = useRef(null);
+  const historyUnsubRef = useRef(null);
+  const [history, setHistory] = useState([]); // list of transactions for this seller
+  const [nameCache, setNameCache] = useState({}); // userId -> name
+  const [productCache, setProductCache] = useState({}); // productId -> title
 
   function pct(value, total) {
     if (!total || total <= 0) return 0;
     return Math.min(100, Math.round((Number(value) / Number(total)) * 100));
   }
+
+  // Helper: resolve user name with backend preferred
+  const resolveUserName = useCallback(async (userId) => {
+    if (!userId) return '';
+    if (nameCache[userId]) return nameCache[userId];
+    let name = '';
+    try {
+      const res = await authFetch(`/api/users/${encodeURIComponent(userId)}`);
+      if (res && res.ok) {
+        const u = await res.json();
+        name = u.name || u.displayName || u.username || (u.email ? String(u.email).split('@')[0] : '') || '';
+      }
+    } catch (_) { /* continue to Firestore fallback */ }
+    if (!name) {
+      try {
+        const { db } = await import('../firebase');
+        const { doc, getDoc } = await import('firebase/firestore');
+        const ref = doc(db, 'users', String(userId));
+        const s = await getDoc(ref);
+        if (s.exists()) {
+          const u = s.data() || {};
+          name = u.name || u.displayName || u.username || (u.email ? String(u.email).split('@')[0] : '') || '';
+        }
+      } catch (_) {}
+    }
+    setNameCache(prev => ({ ...prev, [userId]: name || String(userId) }));
+    return name || String(userId);
+  }, [nameCache]);
+
+  // Helper: resolve product title
+  const resolveProductTitle = useCallback(async (productId) => {
+    if (!productId) return '';
+    if (productCache[productId]) return productCache[productId];
+    let title = '';
+    try {
+      const res = await authFetch(`/api/products/${encodeURIComponent(productId)}`);
+      if (res && res.ok) {
+        const p = await res.json();
+        title = p.title || p.name || '';
+      }
+    } catch (_) { /* fallback to Firestore */ }
+    if (!title) {
+      try {
+        const { db } = await import('../firebase');
+        const { doc, getDoc } = await import('firebase/firestore');
+        const ref = doc(db, 'products', String(productId));
+        const s = await getDoc(ref);
+        if (s.exists()) {
+          const p = s.data() || {};
+          title = p.title || p.name || '';
+        }
+      } catch (_) {}
+    }
+    setProductCache(prev => ({ ...prev, [productId]: title || String(productId) }));
+    return title || String(productId);
+  }, [productCache]);
 
   // Realtime listener (defined before useEffect to satisfy no-use-before-define)
   const attachRealtimeListener = useCallback(async function attachRealtimeListener() {
@@ -56,6 +116,32 @@ export default function ImpactReportPanel() {
     } catch (e) { /* ignore */ }
   }, []);
 
+  // Realtime listener for seller's transaction history (points_history)
+  const attachHistoryListener = useCallback(async function attachHistoryListener() {
+    try {
+      const { db } = await import('../firebase');
+      const { collection, onSnapshot, query, where, orderBy, limit } = await import('firebase/firestore');
+      const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
+      if (!uid) return;
+      const q = query(
+        collection(db, 'points_history'),
+        where('sellerId', '==', uid),
+        orderBy('createdAt', 'desc'),
+        limit(50)
+      );
+      const unsub = onSnapshot(q, (snap) => {
+        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setHistory(rows);
+        // Kick off async enrichment (names & product titles)
+        rows.forEach(r => {
+          if (r.buyerId && !nameCache[r.buyerId]) resolveUserName(r.buyerId).catch(()=>{});
+          if (r.productId && !productCache[r.productId]) resolveProductTitle(r.productId).catch(()=>{});
+        });
+      }, (err) => { console.debug('ImpactReport history realtime error', err && err.message); });
+      historyUnsubRef.current = unsub;
+    } catch (e) { /* ignore */ }
+  }, [nameCache, productCache, resolveUserName, resolveProductTitle]);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -92,6 +178,7 @@ export default function ImpactReportPanel() {
           // Also attach a realtime listener to Firestore for live updates
           attachRealtimeListener();
           attachUserPointsListener();
+          attachHistoryListener();
           return;
         }
       } catch (e) {
@@ -121,6 +208,7 @@ export default function ImpactReportPanel() {
         // Attach realtime listener
         attachRealtimeListener();
         attachUserPointsListener();
+        attachHistoryListener();
       } catch (e) {
         if (!cancelled) { setSold(0); }
       } finally {
@@ -132,8 +220,9 @@ export default function ImpactReportPanel() {
       cancelled = true;
       if (unsubRef.current) { try { unsubRef.current(); } catch(e) {} }
       if (userUnsubRef.current) { try { userUnsubRef.current(); } catch(e) {} }
+      if (historyUnsubRef.current) { try { historyUnsubRef.current(); } catch(e) {} }
     };
-  }, [attachRealtimeListener, attachUserPointsListener]);
+  }, [attachRealtimeListener, attachUserPointsListener, attachHistoryListener]);
 
   function isSoldStatus(status) {
     if (!status) return false;
@@ -190,6 +279,51 @@ export default function ImpactReportPanel() {
           </div>
         </div>
       </div>
+
+      {/* Transactions */}
+      <div className="mt-6">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-lg font-semibold text-gray-800">Recent Transactions</h4>
+          <span className="text-xs text-gray-500">Showing latest {Math.min(history.length, 50)} records</span>
+        </div>
+        {history.length === 0 ? (
+          <div className="text-sm text-gray-500">No transactions yet.</div>
+        ) : (
+          <div className="overflow-auto border rounded-xl">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="px-3 py-2 text-left">Item</th>
+                  <th className="px-3 py-2 text-left">Buyer</th>
+                  <th className="px-3 py-2 text-right">Seller Points</th>
+                  <th className="px-3 py-2 text-right">Buyer Points</th>
+                  <th className="px-3 py-2 text-left">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map(h => (
+                  <tr key={h.id} className="border-t">
+                    <td className="px-3 py-2 whitespace-nowrap">{productCache[h.productId] || h.productId}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{nameCache[h.buyerId] || h.buyerId}</td>
+                    <td className="px-3 py-2 text-right text-emerald-700 font-medium">{Number(h.sellerPoints || 0)}</td>
+                    <td className="px-3 py-2 text-right text-blue-700 font-medium">{Number(h.buyerPoints || 0)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{formatDate(h.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
+}
+
+function formatDate(ts) {
+  try {
+    if (!ts) return '';
+    const d = typeof ts.toDate === 'function' ? ts.toDate() : new Date(ts);
+    if (isNaN(d)) return '';
+    return d.toLocaleString();
+  } catch (_) { return ''; }
 }

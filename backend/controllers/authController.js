@@ -27,20 +27,39 @@ exports.register = async (req, res) => {
     }
 
     const createdAt = admin.firestore.FieldValue.serverTimestamp();
+    // Derive consistent name fields
+    const inputFirst = (rest.firstName || '').toString().trim();
+    const inputLast = (rest.lastName || '').toString().trim();
+    const inputSingle = (rest.name || rest.username || '').toString().trim();
+    const firstName = inputFirst || (inputSingle ? inputSingle.split(' ').slice(0, -1).join(' ') : '');
+    const lastName = inputLast || (inputSingle ? inputSingle.split(' ').slice(-1).join(' ') : '');
+    const fullName = [firstName, lastName].filter(Boolean).join(' ') || inputSingle;
+    const displayName = fullName || undefined;
+    const baseProfile = {
+      firstName: firstName || undefined,
+      lastName: lastName || undefined,
+      name: fullName || undefined,
+      username: fullName || rest.username || undefined,
+      displayName: displayName || undefined,
+      fullName: fullName || undefined,
+      role: rest.role || 'user',
+      phone: rest.phone || '',
+      status: 'Active',
+    };
     // Store minimal profile in Firestore and reference the auth uid. If a
     // profile with the same authId already exists, update it; otherwise create.
     const usersRef = db.collection('users');
     const q = await usersRef.where('authId', '==', userRecord.uid).limit(1).get();
     if (!q.empty) {
       const doc = q.docs[0];
-      await usersRef.doc(doc.id).update({ email, ...rest, updatedAt: createdAt });
-      return res.status(200).json({ id: doc.id, authId: userRecord.uid, email, ...rest });
+      await usersRef.doc(doc.id).update({ email, ...baseProfile, updatedAt: createdAt });
+      return res.status(200).json({ id: doc.id, authId: userRecord.uid, email, ...baseProfile });
     }
 
     // If no profile exists, create a new one keyed by authId
-    const profile = { authId: userRecord.uid, email, ...rest, createdAt };
+    const profile = { authId: userRecord.uid, email, ...baseProfile, createdAt };
     const ref = await usersRef.add(profile);
-    res.status(201).json({ id: ref.id, authId: userRecord.uid, email, ...rest });
+    res.status(201).json({ id: ref.id, authId: userRecord.uid, email, ...baseProfile });
   } catch (err) {
     console.error('Auth register error:', err);
     res.status(500).json({ error: err.message });

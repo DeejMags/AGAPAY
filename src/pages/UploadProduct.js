@@ -8,7 +8,6 @@ export default function UploadProduct(){
   const [price,setPrice]=useState('')
   const [category,setCategory]=useState('')
   const [imageFile, setImageFile] = useState(null)
-  const [location,setLocation]=useState('')
   const [preview, setPreview] = useState('')
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState({})

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { auth } from '../firebase';
 
 export default function SignupForm({ onSuccess }){
@@ -33,7 +33,8 @@ export default function SignupForm({ onSuccess }){
       setError('Google sign up failed: ' + err.message);
     }
   }
-  const [name,setName] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
   const [email,setEmail] = useState('')
   const [phone,setPhone] = useState('')
   const [password,setPassword] = useState('')
@@ -41,11 +42,17 @@ export default function SignupForm({ onSuccess }){
   const [role,setRole] = useState('user')
   const [error,setError] = useState('')
   const [fieldErrors, setFieldErrors] = useState({});
+  const [verificationSent, setVerificationSent] = useState(false);
+  const [checkingVerification, setCheckingVerification] = useState(false);
+  const [verificationError, setVerificationError] = useState('');
+  const [pollCount, setPollCount] = useState(0);
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
 
 
   function validateAll() {
     const errs = {};
-    if (!name.trim()) errs.name = 'Name is required';
+    if (!firstName.trim()) errs.firstName = 'First name is required';
+    if (!lastName.trim()) errs.lastName = 'Last name is required';
     if (!email.trim()) errs.email = 'Email is required';
     else if (!/^\S+@\S+\.\S+$/.test(email)) errs.email = 'Invalid email';
   // location removed
@@ -65,7 +72,16 @@ export default function SignupForm({ onSuccess }){
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, email, phone, role, password })
+        body: JSON.stringify({
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          // Keep name for backward compatibility in places that expect a single field
+          name: `${firstName} ${lastName}`.trim(),
+          email,
+          phone,
+          role,
+          password,
+        })
       });
       if (!res.ok) {
         const j = await res.json().catch(()=>({ error: 'Signup failed' }));
@@ -77,24 +93,102 @@ export default function SignupForm({ onSuccess }){
       // After backend creates the auth user, do a client sign-in so firebase client has currentUser
       const { signInWithEmailAndPassword, updateProfile } = await import('firebase/auth');
       const cred = await signInWithEmailAndPassword(auth, email, password);
-      await updateProfile(cred.user, { displayName: name });
-    const isAdmin = email === 'admin@agapay.com' || email === 'admin@gmail.com';
-    const profile = { id: json.id || cred.user.uid, username: name, email, phone, profilePic: cred.user.photoURL || '', role: isAdmin ? 'admin' : role };
+      const fullName = `${firstName} ${lastName}`.trim();
+      await updateProfile(cred.user, { displayName: fullName });
+      const isAdmin = email === 'admin@agapay.com' || email === 'admin@gmail.com';
+      const profile = {
+        id: json.id || cred.user.uid,
+        username: fullName,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email,
+        phone,
+        profilePic: cred.user.photoURL || '',
+        role: isAdmin ? 'admin' : role,
+      };
       localStorage.setItem('user', JSON.stringify(profile));
       localStorage.setItem('token', cred.user.uid);
-      if(isAdmin) { window.location.replace('/admin'); return; }
-      if(onSuccess) onSuccess(cred.user);
+      // Send verification email if not verified yet (Google accounts may already be verified)
+      if (!cred.user.emailVerified) {
+        try {
+          const { sendEmailVerification } = await import('firebase/auth');
+          await sendEmailVerification(cred.user);
+          setVerificationSent(true);
+          // Begin polling for verification status
+          setCheckingVerification(true);
+          setShowVerificationModal(true);
+        } catch (e) {
+          setVerificationError('Failed to send verification email: ' + (e.message || String(e)));
+        }
+      } else {
+        // Already verified - proceed immediately
+        if (isAdmin) { window.location.replace('/admin'); return; }
+        if (onSuccess) onSuccess(cred.user);
+      }
     } catch (err) {
       console.error('Signup error', err);
       setError('Sign up failed: ' + (err.message || String(err)));
     }
   }
 
+  // Poll for email verification (every 6s, up to ~50 attempts ~5min)
+  useEffect(() => {
+    let interval;
+    async function check() {
+      if (!auth.currentUser) return;
+      try {
+        await auth.currentUser.reload();
+        if (auth.currentUser.emailVerified) {
+          setCheckingVerification(false);
+          // Update stored user to mark verified if needed
+          try {
+            const stored = JSON.parse(localStorage.getItem('user') || 'null');
+            if (stored) {
+              stored.emailVerified = true;
+              localStorage.setItem('user', JSON.stringify(stored));
+            }
+          } catch {}
+          // Navigate to landing page
+          window.location.replace('/');
+        } else {
+          setPollCount(c => c + 1);
+          if (pollCount > 50) setCheckingVerification(false); // stop polling after limit
+        }
+      } catch (e) {
+        // Ignore reload errors; user might have signed out in another tab
+      }
+    }
+    if (checkingVerification) {
+      interval = setInterval(check, 6000);
+    }
+    return () => interval && clearInterval(interval);
+  }, [checkingVerification, pollCount]);
+
+  async function resendVerification() {
+    if (!auth.currentUser) return;
+    setVerificationError('');
+    try {
+      const { sendEmailVerification } = await import('firebase/auth');
+      await sendEmailVerification(auth.currentUser);
+      setVerificationSent(true);
+    } catch (e) {
+      setVerificationError('Resend failed: ' + (e.message || String(e)));
+    }
+  }
+
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
   {error && <div className="text-red-600">{error}</div>}
-  <input value={name} onChange={e=>setName(e.target.value)} placeholder="Name" className="p-2 border rounded" />
-  {fieldErrors.name && <div className="text-red-500 text-sm">{fieldErrors.name}</div>}
+  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+    <div>
+      <input value={firstName} onChange={e=>setFirstName(e.target.value)} placeholder="First name" className="p-2 border rounded w-full" />
+      {fieldErrors.firstName && <div className="text-red-500 text-sm">{fieldErrors.firstName}</div>}
+    </div>
+    <div>
+      <input value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="Last name" className="p-2 border rounded w-full" />
+      {fieldErrors.lastName && <div className="text-red-500 text-sm">{fieldErrors.lastName}</div>}
+    </div>
+  </div>
   <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" className="p-2 border rounded" />
   {fieldErrors.email && <div className="text-red-500 text-sm">{fieldErrors.email}</div>}
   <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Phone" className="p-2 border rounded" />
@@ -114,6 +208,81 @@ export default function SignupForm({ onSuccess }){
       <button type="button" className="p-2 bg-red-500 text-white rounded mt-2" onClick={handleGoogleSignup}>
         Sign Up with Google
       </button>
+      {/* Fallback inline notice if modal is closed */}
+      {verificationSent && !showVerificationModal && !auth.currentUser?.emailVerified && (
+        <div className="mt-4 p-3 border rounded bg-yellow-50 text-sm text-gray-700">
+          <div className="font-medium mb-1">Verify your email</div>
+          <p>We sent a verification link to <strong>{email}</strong>. Please click it, then return here; you'll be redirected automatically.</p>
+          {checkingVerification ? (
+            <p className="mt-2 text-xs text-gray-500">Waiting for verification... (polling)</p>
+          ) : (
+            <button type="button" onClick={()=> setCheckingVerification(true)} className="mt-2 text-xs underline text-teal-700">Start checking</button>
+          )}
+          <button type="button" onClick={resendVerification} className="mt-2 text-xs underline text-teal-700">Resend email</button>
+          {verificationError && <div className="mt-2 text-xs text-red-600">{verificationError}</div>}
+        </div>
+      )}
+
+      {/* Verification Sent Modal */}
+      {showVerificationModal && verificationSent && !auth.currentUser?.emailVerified && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowVerificationModal(false)}
+          />
+          {/* Modal Card */}
+          <div className="relative z-10 mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <div className="mb-3 flex items-start justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">Check your email</h3>
+              <button
+                type="button"
+                aria-label="Close"
+                className="rounded p-1 text-gray-500 hover:bg-gray-100"
+                onClick={() => setShowVerificationModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-sm text-gray-700">
+              We sent a verification link to <span className="font-medium">{email}</span>.
+              Please open your inbox and click the link to activate your account.
+            </p>
+            {verificationError && (
+              <div className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+                {verificationError}
+              </div>
+            )}
+            <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <a
+                href="https://mail.google.com/"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex justify-center rounded bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+              >
+                Open Gmail
+              </a>
+              <button
+                type="button"
+                onClick={resendVerification}
+                className="inline-flex justify-center rounded bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700"
+              >
+                Resend email
+              </button>
+              <button
+                type="button"
+                onClick={() => setCheckingVerification(true)}
+                className="inline-flex justify-center rounded border border-teal-600 px-3 py-2 text-sm font-medium text-teal-700 hover:bg-teal-50 sm:col-span-2"
+              >
+                I've verified — Check now
+              </button>
+            </div>
+            {checkingVerification && (
+              <p className="mt-3 text-xs text-gray-500">Waiting for verification... we'll redirect you automatically.</p>
+            )}
+          </div>
+        </div>
+      )}
     </form>
   )
 }

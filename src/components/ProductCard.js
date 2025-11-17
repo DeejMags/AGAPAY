@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 export default function ProductCard({ product, index }) {
@@ -19,6 +19,24 @@ export default function ProductCard({ product, index }) {
     }, 450);
   }
 
+  // Derive a concise, human-friendly location label
+  const locationLabel = useMemo(() => {
+    const loc = product && product.location;
+    if (!loc) return '';
+    if (typeof loc === 'string') return loc.trim();
+    if (typeof loc === 'object') {
+      if (loc.address && typeof loc.address === 'string') return loc.address;
+      const parts = [loc.barangay || loc.district, loc.city || loc.municipality, loc.state || loc.province, loc.country]
+        .map(v => (v ? String(v).trim() : ''))
+        .filter(Boolean);
+      if (parts.length) return parts.join(', ');
+      if (typeof loc.lat === 'number' && typeof loc.lng === 'number') {
+        return `${loc.lat.toFixed(3)}, ${loc.lng.toFixed(3)}`;
+      }
+    }
+    return '';
+  }, [product]);
+
   return (
   <a href={`/product/${product._id || product.id}`} onClick={goToDetail} className="block border rounded overflow-hidden hover:shadow-lg transform hover:scale-102 transition duration-200 bg-white animate-slideUp" data-index={index}>
     <div className="h-40 bg-gray-100 flex items-center justify-center overflow-hidden relative">
@@ -29,7 +47,14 @@ export default function ProductCard({ product, index }) {
       <h3 className="font-semibold truncate">{product.title}</h3>
       <p className="text-sm text-gray-600">₱{product.price} <span className="text-xs text-gray-500">· {product.category}</span></p>
       {product.desc && <p className="text-xs text-gray-500 mt-1 truncate">{product.desc}</p>}
-      <div className="mt-2 text-xs text-gray-600">Location: {product.location || 'N/A'}</div>
+      {locationLabel && (
+        <div className="mt-2 text-xs text-gray-600 flex items-center gap-1" title={locationLabel}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-teal-600 flex-shrink-0">
+            <path d="M12 2C8.14 2 5 5.14 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.86-3.14-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z" />
+          </svg>
+          <span className="truncate max-w-full">{locationLabel}</span>
+        </div>
+      )}
       <div className="mt-2 text-xs text-blue-600 cursor-pointer" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate(`/profile/${product.sellerId}`) }}>View seller</div>
       <button
         className="mt-3 w-full bg-teal-600 text-white py-2 rounded hover:bg-teal-700 transition font-semibold"
