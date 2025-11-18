@@ -10,9 +10,17 @@ export default function ImpactReportPanel() {
   const unsubRef = useRef(null);
   const userUnsubRef = useRef(null);
   const historyUnsubRef = useRef(null);
+  const buyerHistoryUnsubRef = useRef(null);
   const [history, setHistory] = useState([]); // list of transactions for this seller
+  const [historyLoading, setHistoryLoading] = useState(true); // loading indicator for transactions
   const [nameCache, setNameCache] = useState({}); // userId -> name
   const [productCache, setProductCache] = useState({}); // productId -> title
+  // Refs mirror caches to avoid adding them as dependencies in callbacks that attach listeners
+  const nameCacheRef = useRef({});
+  const productCacheRef = useRef({});
+
+  useEffect(() => { nameCacheRef.current = nameCache; }, [nameCache]);
+  useEffect(() => { productCacheRef.current = productCache; }, [productCache]);
 
   function pct(value, total) {
     if (!total || total <= 0) return 0;
@@ -47,30 +55,23 @@ export default function ImpactReportPanel() {
     return name || String(userId);
   }, [nameCache]);
 
-  // Helper: resolve product title
+  // Helper: resolve product title (prefer Firestore to avoid backend 404 noise for deleted items)
   const resolveProductTitle = useCallback(async (productId) => {
     if (!productId) return '';
     if (productCache[productId]) return productCache[productId];
     let title = '';
+    // First, try Firestore directly (client always has access and avoids network 404 spam)
     try {
-      const res = await authFetch(`/api/products/${encodeURIComponent(productId)}`);
-      if (res && res.ok) {
-        const p = await res.json();
+      const { db } = await import('../firebase');
+      const { doc, getDoc } = await import('firebase/firestore');
+      const ref = doc(db, 'products', String(productId));
+      const s = await getDoc(ref);
+      if (s.exists()) {
+        const p = s.data() || {};
         title = p.title || p.name || '';
       }
-    } catch (_) { /* fallback to Firestore */ }
-    if (!title) {
-      try {
-        const { db } = await import('../firebase');
-        const { doc, getDoc } = await import('firebase/firestore');
-        const ref = doc(db, 'products', String(productId));
-        const s = await getDoc(ref);
-        if (s.exists()) {
-          const p = s.data() || {};
-          title = p.title || p.name || '';
-        }
-      } catch (_) {}
-    }
+    } catch (_) {}
+    // Intentionally skip backend lookup if Firestore doesn't have the doc to avoid noisy 404s
     setProductCache(prev => ({ ...prev, [productId]: title || String(productId) }));
     return title || String(productId);
   }, [productCache]);
@@ -116,31 +117,84 @@ export default function ImpactReportPanel() {
     } catch (e) { /* ignore */ }
   }, []);
 
-  // Realtime listener for seller's transaction history (points_history)
+  // Realtime listener for transaction history (seller and buyer views) with graceful fallback if index is missing
   const attachHistoryListener = useCallback(async function attachHistoryListener() {
     try {
+      setHistoryLoading(true);
       const { db } = await import('../firebase');
       const { collection, onSnapshot, query, where, orderBy, limit } = await import('firebase/firestore');
       const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
-      if (!uid) return;
-      const q = query(
-        collection(db, 'points_history'),
-        where('sellerId', '==', uid),
-        orderBy('createdAt', 'desc'),
-        limit(50)
-      );
-      const unsub = onSnapshot(q, (snap) => {
-        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setHistory(rows);
-        // Kick off async enrichment (names & product titles)
-        rows.forEach(r => {
-          if (r.buyerId && !nameCache[r.buyerId]) resolveUserName(r.buyerId).catch(()=>{});
-          if (r.productId && !productCache[r.productId]) resolveProductTitle(r.productId).catch(()=>{});
+      if (!uid) { setHistoryLoading(false); return; }
+
+      // Track when both sources (seller and buyer) have produced their first snapshot
+      let sellerLoaded = false;
+      let buyerLoaded = false;
+      function markSourceLoaded(source) {
+        if (source === 'seller') sellerLoaded = true; else buyerLoaded = true;
+        if (sellerLoaded && buyerLoaded) setHistoryLoading(false);
+      }
+
+      // Helper to attach a snapshot with fallback when composite index for orderBy is missing
+      async function attachWithFallback(roleField, storeRef) {
+        const base = collection(db, 'points_history');
+        const qOrdered = query(base, where(roleField, '==', uid), orderBy('createdAt', 'desc'), limit(50));
+        let firstAttempt = true;
+        const unsub = onSnapshot(qOrdered, (snap) => {
+          const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          updateMergedHistory(roleField, rows);
+          markSourceLoaded(storeRef);
+        }, (err) => {
+          const msg = (err && (err.message || err.code)) || '';
+          // Firestore: FAILED_PRECONDITION indicates missing index requirement for where+orderBy
+          if (firstAttempt && /FAILED_PRECONDITION|requires an index/i.test(msg)) {
+            firstAttempt = false;
+            // Fallback: listen without orderBy. We'll sort on the client side later.
+            try {
+              const qSimple = query(base, where(roleField, '==', uid), limit(50));
+              const unsub2 = onSnapshot(qSimple, (snap2) => {
+                const rows2 = snap2.docs.map(d => ({ id: d.id, ...d.data() }));
+                updateMergedHistory(roleField, rows2);
+                markSourceLoaded(storeRef);
+              });
+              // swap unsub reference
+              if (storeRef === 'seller') historyUnsubRef.current = unsub2; else buyerHistoryUnsubRef.current = unsub2;
+              // Stop original listener
+              try { unsub(); } catch {}
+            } catch {}
+          } else {
+            console.debug('ImpactReport history realtime error', msg);
+          }
         });
-      }, (err) => { console.debug('ImpactReport history realtime error', err && err.message); });
-      historyUnsubRef.current = unsub;
+        if (storeRef === 'seller') historyUnsubRef.current = unsub; else buyerHistoryUnsubRef.current = unsub;
+      }
+
+      // Maintain separate caches then merge
+      let latestSeller = [];
+      let latestBuyer = [];
+      function updateMergedHistory(source, rows) {
+        if (source === 'seller') latestSeller = rows; else latestBuyer = rows;
+        const merged = [...latestSeller, ...latestBuyer]
+          .reduce((acc, item) => { acc.set(item.id, item); return acc; }, new Map());
+        const list = Array.from(merged.values());
+        // Enrich
+        list.forEach(r => {
+          if (r.buyerId && !nameCacheRef.current[r.buyerId]) resolveUserName(r.buyerId).catch(()=>{});
+          if (r.sellerId && !nameCacheRef.current[r.sellerId]) resolveUserName(r.sellerId).catch(()=>{});
+          if (r.productId && !productCacheRef.current[r.productId]) resolveProductTitle(r.productId).catch(()=>{});
+        });
+        // Sort by createdAt desc if present
+        list.sort((a,b) => {
+          const da = (a.createdAt && typeof a.createdAt.toDate === 'function') ? a.createdAt.toDate().getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+          const db = (b.createdAt && typeof b.createdAt.toDate === 'function') ? b.createdAt.toDate().getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+          return db - da;
+        });
+        setHistory(list);
+      }
+
+      await attachWithFallback('sellerId', 'seller');
+      await attachWithFallback('buyerId', 'buyer');
     } catch (e) { /* ignore */ }
-  }, [nameCache, productCache, resolveUserName, resolveProductTitle]);
+  }, [resolveUserName, resolveProductTitle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -221,6 +275,7 @@ export default function ImpactReportPanel() {
       if (unsubRef.current) { try { unsubRef.current(); } catch(e) {} }
       if (userUnsubRef.current) { try { userUnsubRef.current(); } catch(e) {} }
       if (historyUnsubRef.current) { try { historyUnsubRef.current(); } catch(e) {} }
+      if (buyerHistoryUnsubRef.current) { try { buyerHistoryUnsubRef.current(); } catch(e) {} }
     };
   }, [attachRealtimeListener, attachUserPointsListener, attachHistoryListener]);
 
@@ -284,9 +339,34 @@ export default function ImpactReportPanel() {
       <div className="mt-6">
         <div className="flex items-center justify-between mb-3">
           <h4 className="text-lg font-semibold text-gray-800">Recent Transactions</h4>
-          <span className="text-xs text-gray-500">Showing latest {Math.min(history.length, 50)} records</span>
+          <span className="text-xs text-gray-500">{historyLoading ? 'Loading transactions…' : `Showing latest ${Math.min(history.length, 50)} records`}</span>
         </div>
-        {history.length === 0 ? (
+        {historyLoading ? (
+          <div className="overflow-auto border rounded-xl">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="px-3 py-2 text-left">Item</th>
+                  <th className="px-3 py-2 text-left">Counterparty</th>
+                  <th className="px-3 py-2 text-right">Your Points</th>
+                  <th className="px-3 py-2 text-left">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-t">
+                  <td colSpan={4} className="px-3 py-4">
+                    <div className="animate-pulse space-y-3">
+                      <div className="h-4 bg-gray-200 rounded w-3/4" />
+                      <div className="h-3 bg-gray-200 rounded w-2/3" />
+                      <div className="h-3 bg-gray-200 rounded w-1/2" />
+                      <div className="h-3 bg-gray-200 rounded w-1/3" />
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ) : (history.length === 0 ? (
           <div className="text-sm text-gray-500">No transactions yet.</div>
         ) : (
           <div className="overflow-auto border rounded-xl">
@@ -294,26 +374,33 @@ export default function ImpactReportPanel() {
               <thead className="bg-gray-50 text-gray-600">
                 <tr>
                   <th className="px-3 py-2 text-left">Item</th>
-                  <th className="px-3 py-2 text-left">Buyer</th>
-                  <th className="px-3 py-2 text-right">Seller Points</th>
-                  <th className="px-3 py-2 text-right">Buyer Points</th>
+                  <th className="px-3 py-2 text-left">Counterparty</th>
+                  <th className="px-3 py-2 text-right">Your Points</th>
                   <th className="px-3 py-2 text-left">Date</th>
                 </tr>
               </thead>
               <tbody>
-                {history.map(h => (
-                  <tr key={h.id} className="border-t">
-                    <td className="px-3 py-2 whitespace-nowrap">{productCache[h.productId] || h.productId}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{nameCache[h.buyerId] || h.buyerId}</td>
-                    <td className="px-3 py-2 text-right text-emerald-700 font-medium">{Number(h.sellerPoints || 0)}</td>
-                    <td className="px-3 py-2 text-right text-blue-700 font-medium">{Number(h.buyerPoints || 0)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{formatDate(h.createdAt)}</td>
-                  </tr>
-                ))}
+                {history.map(h => {
+                  const uid = (auth && auth.currentUser && auth.currentUser.uid) || '';
+                  const isSeller = h && String(h.sellerId || '') === String(uid);
+                  const counterpartyId = isSeller ? h.buyerId : h.sellerId;
+                  const counterparty = nameCache[counterpartyId] || counterpartyId || '—';
+                  const yourPoints = isSeller ? Number(h.sellerPoints || 0) : Number(h.buyerPoints || 0);
+                  // Prefer title captured in history (survives product deletion); fallback to cache or ID
+                  const itemTitle = (h.productTitle && String(h.productTitle).trim()) || productCache[h.productId] || h.productId;
+                  return (
+                    <tr key={h.id} className="border-t">
+                      <td className="px-3 py-2 whitespace-nowrap">{itemTitle}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{counterparty}</td>
+                      <td className={`px-3 py-2 text-right font-medium ${isSeller ? 'text-emerald-700' : 'text-blue-700'}`}>{yourPoints}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{formatDate(h.createdAt)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-        )}
+        ))}
       </div>
     </div>
   );

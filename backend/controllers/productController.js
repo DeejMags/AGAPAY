@@ -660,6 +660,17 @@ exports.markSold = async (req, res) => {
     const sellerRef = db.collection('users').doc(String(sellerId));
     const buyerRef = db.collection('users').doc(String(buyerId));
 
+    // Capture current product presentation details for history (so transactions keep showing even if product is later deleted)
+    const productTitle = (product.title || product.name || '');
+    let productImageUrl = '';
+    try {
+      if (product.imageUrl) productImageUrl = product.imageUrl;
+      else if (product.photo) productImageUrl = product.photo;
+      else if (product.imagePath) {
+        productImageUrl = `https://storage.googleapis.com/${admin.storage().bucket().name}/${encodeURIComponent(product.imagePath)}`;
+      }
+    } catch (e) { productImageUrl = ''; }
+
     let alreadyAwarded = false;
 
     await db.runTransaction(async (tx) => {
@@ -701,6 +712,8 @@ exports.markSold = async (req, res) => {
         // Record history
         tx.set(historyRef, {
           productId,
+          productTitle,
+          productImageUrl,
           sellerId,
           buyerId: String(buyerId),
           category: normCat,
