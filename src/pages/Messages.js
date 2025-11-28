@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import FullScreenLoader from '../components/FullScreenLoader'
 import MessageBubble from '../components/MessageBubble'
 import * as msgService from '../firebaseMessageService'
@@ -10,6 +11,7 @@ function makeChatId(a,b){
 }
 
 export default function Messages(){
+  const navigate = useNavigate();
   const [conversations, setConversations] = useState([]) // list of { chatId, title, otherId, otherName, otherAvatar, lastMessage }
   const [selectedChat, setSelectedChat] = useState(null) // chatId
   const [messages, setMessages] = useState([])
@@ -18,6 +20,8 @@ export default function Messages(){
   const [loading, setLoading] = useState(true)
   const [userCache, setUserCache] = useState({}) // id -> { id, username, email, profilePic }
   const [userNotFound, setUserNotFound] = useState({}) // id -> true if 404 or unavailable
+  const [showActions, setShowActions] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
   const listRef = useRef()
   
 
@@ -99,24 +103,32 @@ export default function Messages(){
   // Ensure a conversation has a reliable otherId and try to backfill its name/avatar
   const ensureOtherParticipantAndName = useCallback(async (conv) => {
     if (!conv || !conv.chatId) return;
+    const meId = (auth && auth.currentUser && auth.currentUser.uid) || (JSON.parse(localStorage.getItem('user')||'null')?.id);
     let otherId = conv.otherId;
-    // If otherId is missing or is a legacy pseudo id, try to fetch conversation meta
-    if (!otherId || String(otherId).startsWith('seller_')) {
+    let meta = null;
+    // If otherId missing OR equals me (race / legacy) OR is pseudo id, re-resolve via meta
+    if (!otherId || String(otherId).startsWith('seller_') || (meId && String(otherId) === String(meId))) {
       try {
-        const meta = await msgService.getConversationMeta(conv.chatId);
-        const meId = (auth && auth.currentUser && auth.currentUser.uid) || (JSON.parse(localStorage.getItem('user')||'null')?.id);
+        meta = await msgService.getConversationMeta(conv.chatId);
         const parts = (meta && Array.isArray(meta.participants)) ? meta.participants.map(String) : [];
         const resolvedOther = parts.find(p => String(p) !== String(meId));
-        if (resolvedOther) otherId = resolvedOther;
-      } catch (_) { /* ignore */ }
+        if (resolvedOther) otherId = resolvedOther; else otherId = null;
+      } catch (_) { otherId = null; }
     }
-    if (!otherId) return;
-    // Update conv with otherId if it changed
-    if (otherId && otherId !== conv.otherId) {
-      setConversations(prev => prev.map(c => c.chatId === conv.chatId ? { ...c, otherId } : c));
+    if (!otherId || (meId && String(otherId) === String(meId))) return; // still ambiguous, skip
+    const otherKey = String(otherId);
+    const nameFromMeta = meta && meta.participantNames ? meta.participantNames[otherKey] : null;
+    const avatarFromMeta = meta && meta.participantAvatars ? meta.participantAvatars[otherKey] : null;
+    const updates = {};
+    if (nameFromMeta && String(nameFromMeta).trim()) updates.otherName = nameFromMeta;
+    if (avatarFromMeta) updates.otherAvatar = avatarFromMeta;
+    // Update conv with otherId or meta-provided info if it changed
+    if (otherId !== conv.otherId || Object.keys(updates).length) {
+      setConversations(prev => prev.map(c => c.chatId === conv.chatId ? { ...c, otherId, ...updates } : c));
     }
-    // If name is missing, resolve and update
-    const hasName = !!(conv.otherName && String(conv.otherName).trim() !== '');
+    // If name is missing after meta, resolve via user profile
+    const currentName = updates.otherName || conv.otherName;
+    const hasName = !!(currentName && String(currentName).trim() !== '');
     if (!hasName) {
       const u = await resolveUserProfile(otherId).catch(()=>null);
       if (u) {
@@ -158,8 +170,9 @@ export default function Messages(){
         if (res.ok) {
           const json = await res.json();
           const myId = me && me.id;
+          const myIdStr = myId != null ? String(myId) : null;
           const enriched = json.map(c => {
-            const otherId = c.otherId || (c.participants && c.participants.find(p => p !== myId)) || null;
+            const otherId = c.otherId || (c.participants && c.participants.map(String).find(p => p !== myIdStr)) || null;
             const cached = otherId ? userCache[otherId] : null;
             const name = c.otherName || displayName(cached);
             const avatar = c.otherAvatar || (cached ? (cached.profilePic || cached.avatar || null) : null);
@@ -177,8 +190,9 @@ export default function Messages(){
             if (res2.ok) {
               const json = await res2.json();
               const myId = me && me.id;
+              const myIdStr = myId != null ? String(myId) : null;
               const enriched = json.map(c => {
-                const otherId = c.otherId || (c.participants && c.participants.find(p => p !== myId)) || null;
+                const otherId = c.otherId || (c.participants && c.participants.map(String).find(p => p !== myIdStr)) || null;
                 const cached = otherId ? userCache[otherId] : null;
                 const name = c.otherName || displayName(cached);
                 const avatar = c.otherAvatar || (cached ? (cached.profilePic || cached.avatar || null) : null);
@@ -233,7 +247,7 @@ export default function Messages(){
             const base = parts[0];
             const ids = base.split('_');
             const meId = (me && me.id) || 'anon';
-            const otherId = ids.find(x => x !== meId) || ids[0];
+            const otherId = ids.find(x => String(x) !== String(meId)) || ids[0];
             const cached = otherId ? userCache[otherId] : null;
             convsLocal.push({ chatId, otherId, otherName: displayName(cached), otherAvatar: cached ? (cached.profilePic || cached.avatar || null) : null, lastMessage: msgs.length ? msgs[msgs.length - 1] : null, unread: meta && meta.unreadFor && me ? meta.unreadFor.includes(me.id) : false });
           });
@@ -278,7 +292,7 @@ export default function Messages(){
         if (me && me.id) {
         unsubConvs = msgService.subscribeToUserConversations(me.id, (list) => {
           const mapped = list.map(c => {
-            const otherId = (c.participants || []).find(p => p !== me.id) || null;
+            const otherId = (c.participants || []).map(String).find(p => p !== String(me.id)) || null;
             const cached = otherId ? userCache[otherId] : null;
             const unreadMap = c.unreadMap || {};
             return { chatId: c.conversationId, otherId, otherName: displayName(cached), otherAvatar: cached ? (cached.profilePic || cached.avatar || null) : null, lastMessage: c.lastMessage, unread: (c.unreadCount || 0) > 0, unreadMap };
@@ -526,7 +540,88 @@ export default function Messages(){
                     })()}
                   </div>
                 </div>
-                <div className="text-xs text-gray-500">Messages</div>
+                <div className="flex items-center gap-3 relative">
+                  <div className="text-xs text-gray-500">Messages</div>
+                  {/* Kebab (three dots) menu button */}
+                  <button
+                    type="button"
+                    onClick={() => setShowActions(s => !s)}
+                    className="w-10 h-10 flex items-center justify-center rounded-md border border-gray-200 hover:bg-gray-100 active:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500 transition"
+                    aria-haspopup="true"
+                    aria-expanded={showActions ? 'true' : 'false'}
+                    aria-label="Conversation actions"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-6 h-6 text-gray-600" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                  </button>
+                  {showActions && (
+                    <div className="absolute right-0 top-full mt-2 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-20 animate-fade-in">
+                      <ul className="py-1 text-sm" role="menu">
+                        <li>
+                          <button
+                            role="menuitem"
+                            onClick={async () => {
+                              // Resolve other participant id
+                              const conv = conversations.find(c => c.chatId === selectedChat);
+                              const meId = (auth && auth.currentUser && auth.currentUser.uid) || (JSON.parse(localStorage.getItem('user')||'null')?.id);
+                              let otherId = conv && conv.otherId;
+                              // If missing or equals me (due to legacy type mismatch), re-resolve from conversation meta
+                              if (!otherId || (meId && String(otherId) === String(meId))) {
+                                try {
+                                  const meta = await msgService.getConversationMeta(selectedChat);
+                                  const parts = (meta && Array.isArray(meta.participants)) ? meta.participants.map(String) : [];
+                                  otherId = parts.find(p => String(p) !== String(meId)) || null;
+                                } catch (e) { /* ignore */ }
+                              }
+                              if (!otherId || (meId && String(otherId) === String(meId))) {
+                                alert('Unable to resolve user profile.');
+                                return;
+                              }
+                              let profile = null;
+                              try {
+                                profile = await resolveUserProfile(otherId);
+                              } catch (_) { /* ignore */ }
+                              const displayName = (conv && conv.otherName) || profile?.username || profile?.displayName || profile?.name || (profile?.email ? String(profile.email).split('@')[0] : null);
+                              const hint = {
+                                id: profile?.id || otherId,
+                                authId: profile?.authId,
+                                email: profile?.email,
+                                username: displayName || undefined,
+                                displayName: displayName || undefined,
+                                name: displayName || undefined,
+                                fullName: profile?.fullName,
+                                profilePic: (conv && conv.otherAvatar) || profile?.profilePic || profile?.avatar,
+                                avatar: profile?.avatar,
+                              };
+                              setShowActions(false);
+                              navigate(`/profile/${encodeURIComponent(otherId)}`, { state: { userHint: hint } });
+                            }}
+                            className="w-full text-left px-4 py-2 hover:bg-teal-50 text-teal-700 font-medium"
+                          >
+                            View Profile
+                          </button>
+                        </li>
+                        <li>
+                          <button
+                            role="menuitem"
+                            onClick={() => { setShowDeleteModal(true); setShowActions(false); }}
+                            className="w-full text-left px-4 py-2 hover:bg-red-50 text-red-600 font-medium"
+                          >
+                            Delete Conversation
+                          </button>
+                        </li>
+                        <li>
+                          <button
+                            role="menuitem"
+                            onClick={() => setShowActions(false)}
+                            className="w-full text-left px-4 py-2 hover:bg-gray-100 text-gray-700"
+                          >
+                            Close Menu
+                          </button>
+                        </li>
+                      </ul>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div ref={listRef} className="p-3 border rounded flex-1 overflow-auto flex flex-col gap-3 bg-gray-50">
@@ -585,6 +680,47 @@ export default function Messages(){
           )}
         </div>
       </div>
+      {/* Delete Conversation Modal */}
+      {showDeleteModal && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center px-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowDeleteModal(false)}></div>
+          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md p-6 animate-scale-in">
+            <h2 className="text-xl font-semibold mb-2">Delete Conversation</h2>
+            <p className="text-sm text-gray-600 mb-4">This will permanently remove all messages for both participants. This action cannot be undone.</p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={async () => {
+                  try {
+                    const ok = await msgService.deleteConversation(selectedChat);
+                    if (ok) {
+                      setConversations(prev => prev.filter(c => c.chatId !== selectedChat));
+                      setSelectedChat(null);
+                      setShowDeleteModal(false);
+                    } else {
+                      alert('Failed to delete conversation.');
+                    }
+                  } catch (e) {
+                    alert('Error deleting conversation: ' + (e && e.message ? e.message : 'Unknown error'));
+                  }
+                }}
+                className="w-full px-4 py-2 rounded-md bg-red-600 text-white text-sm font-semibold hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400"
+              >
+                Delete Permanently
+              </button>
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="w-full px-4 py-2 rounded-md bg-gray-100 text-gray-700 text-sm hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  )
+  );
 }

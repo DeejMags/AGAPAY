@@ -344,4 +344,52 @@ async function uploadMessageImage(req, res) {
 	}
 }
 
-module.exports = { listConversations, getConversation, sendMessage, markRead, startConversation, uploadMessageImage };
+// DELETE /api/messages/:id  (hard delete conversation + messages or soft delete if ?soft=1)
+async function deleteConversation(req, res) {
+	if (!ensureFirebaseEnabled(res)) return;
+	const uid = req.user && (req.user.uid || req.user.id);
+	const id = req.params.id;
+	if (!uid) return res.status(401).json({ message: 'Unauthorized' });
+	if (!id) return res.status(400).json({ message: 'Missing id' });
+	try {
+		const convRef = db.collection('conversation').doc(id);
+		const convDoc = await convRef.get();
+		if (!convDoc.exists) return res.status(404).json({ message: 'Conversation not found' });
+		const conv = convDoc.data() || {};
+		const participants = sanitizeParticipants(conv.participants);
+		if (!participants.includes(uid)) return res.status(403).json({ message: 'Forbidden' });
+		// Optional soft delete mode
+		const soft = (/^(1|true|yes)$/i).test(String(req.query.soft || '')); // ?soft=1
+		if (soft) {
+			await convRef.update({ deleted: true, deletedAt: admin.firestore.FieldValue.serverTimestamp(), participants: [], lastMessage: null, unread: {} });
+			return res.json({ ok: true, deleted: id, mode: 'soft' });
+		}
+		// Hard delete: delete all messages subcollection docs in batches then conversation doc
+		try {
+			const msgsSnap = await convRef.collection('messages').get();
+			if (!msgsSnap.empty) {
+				let batch = db.batch();
+				let opCount = 0;
+				for (const d of msgsSnap.docs) {
+					batch.delete(d.ref);
+					opCount++;
+					if (opCount >= 450) { // leave headroom under 500 limit
+						await batch.commit();
+						batch = db.batch();
+						opCount = 0;
+					}
+				}
+				if (opCount > 0) await batch.commit();
+			}
+		} catch (e) {
+			console.warn('Failed to delete messages for conversation', id, e && e.message);
+		}
+		await convRef.delete();
+		return res.json({ ok: true, deleted: id, mode: 'hard' });
+	} catch (err) {
+		console.error('deleteConversation error', err);
+		res.status(500).json({ message: 'Server error' });
+	}
+}
+
+module.exports = { listConversations, getConversation, sendMessage, markRead, startConversation, uploadMessageImage, deleteConversation };

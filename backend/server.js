@@ -19,6 +19,7 @@ const productRoutes = require('./routes/productRoutes')
 const userRoutes = require('./routes/userRoutes')
 const reportRoutes = require('./routes/reportRoutes')
 const debugRoutes = require('./routes/debugRoutes')
+const reviewRoutes = require('./routes/reviewRoutes')
 let messageRoutes = null
 
 const app = express()
@@ -33,6 +34,7 @@ app.use('/api/products', productRoutes)
 app.use('/api/reports', reportRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/debug', debugRoutes)
+app.use('/api/reviews', reviewRoutes)
 
 // If Firebase is enabled we mount the real messageRoutes, otherwise provide a stub
 if (db) {

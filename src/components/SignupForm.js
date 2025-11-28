@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { auth } from '../firebase';
 
-export default function SignupForm({ onSuccess }){
+export default function SignupForm({ onSuccess, onFieldDirty }){
   // Google Sign Up handler
   async function handleGoogleSignup(e) {
     e.preventDefault();
@@ -10,7 +10,6 @@ export default function SignupForm({ onSuccess }){
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
-      // Ensure backend has a corresponding profile; if not, create it
       try {
         const r = await fetch('/api/auth/google', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: user.email, name: user.displayName, uid: user.uid })
@@ -68,14 +67,12 @@ export default function SignupForm({ onSuccess }){
     setError('');
     if (!validateAll()) return;
     try {
-      // Create account via backend so server creates the Auth user and Firestore profile
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           firstName: firstName.trim(),
           lastName: lastName.trim(),
-          // Keep name for backward compatibility in places that expect a single field
           name: `${firstName} ${lastName}`.trim(),
           email,
           phone,
@@ -90,7 +87,6 @@ export default function SignupForm({ onSuccess }){
         return;
       }
       const json = await res.json();
-      // After backend creates the auth user, do a client sign-in so firebase client has currentUser
       const { signInWithEmailAndPassword, updateProfile } = await import('firebase/auth');
       const cred = await signInWithEmailAndPassword(auth, email, password);
       const fullName = `${firstName} ${lastName}`.trim();
@@ -108,20 +104,17 @@ export default function SignupForm({ onSuccess }){
       };
       localStorage.setItem('user', JSON.stringify(profile));
       localStorage.setItem('token', cred.user.uid);
-      // Send verification email if not verified yet (Google accounts may already be verified)
       if (!cred.user.emailVerified) {
         try {
           const { sendEmailVerification } = await import('firebase/auth');
           await sendEmailVerification(cred.user);
           setVerificationSent(true);
-          // Begin polling for verification status
           setCheckingVerification(true);
           setShowVerificationModal(true);
         } catch (e) {
           setVerificationError('Failed to send verification email: ' + (e.message || String(e)));
         }
       } else {
-        // Already verified - proceed immediately
         if (isAdmin) { window.location.replace('/admin'); return; }
         if (onSuccess) onSuccess(cred.user);
       }
@@ -131,7 +124,6 @@ export default function SignupForm({ onSuccess }){
     }
   }
 
-  // Poll for email verification (every 6s, up to ~50 attempts ~5min)
   useEffect(() => {
     let interval;
     async function check() {
@@ -140,7 +132,6 @@ export default function SignupForm({ onSuccess }){
         await auth.currentUser.reload();
         if (auth.currentUser.emailVerified) {
           setCheckingVerification(false);
-          // Update stored user to mark verified if needed
           try {
             const stored = JSON.parse(localStorage.getItem('user') || 'null');
             if (stored) {
@@ -148,14 +139,12 @@ export default function SignupForm({ onSuccess }){
               localStorage.setItem('user', JSON.stringify(stored));
             }
           } catch {}
-          // Navigate to landing page
           window.location.replace('/');
         } else {
           setPollCount(c => c + 1);
-          if (pollCount > 50) setCheckingVerification(false); // stop polling after limit
+          if (pollCount > 50) setCheckingVerification(false); 
         }
       } catch (e) {
-        // Ignore reload errors; user might have signed out in another tab
       }
     }
     if (checkingVerification) {
@@ -181,25 +170,24 @@ export default function SignupForm({ onSuccess }){
   {error && <div className="text-red-600">{error}</div>}
   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
     <div>
-      <input value={firstName} onChange={e=>setFirstName(e.target.value)} placeholder="First name" className="p-2 border rounded w-full" />
+      <input value={firstName} onChange={e=>{ setFirstName(e.target.value); onFieldDirty && onFieldDirty(); }} placeholder="First name" className="p-2 border rounded w-full" />
       {fieldErrors.firstName && <div className="text-red-500 text-sm">{fieldErrors.firstName}</div>}
     </div>
     <div>
-      <input value={lastName} onChange={e=>setLastName(e.target.value)} placeholder="Last name" className="p-2 border rounded w-full" />
+  <input value={lastName} onChange={e=>{ setLastName(e.target.value); onFieldDirty && onFieldDirty(); }} placeholder="Last name" className="p-2 border rounded w-full" />
       {fieldErrors.lastName && <div className="text-red-500 text-sm">{fieldErrors.lastName}</div>}
     </div>
   </div>
-  <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" className="p-2 border rounded" />
+  <input value={email} onChange={e=>{ setEmail(e.target.value); onFieldDirty && onFieldDirty(); }} placeholder="Email" className="p-2 border rounded" />
   {fieldErrors.email && <div className="text-red-500 text-sm">{fieldErrors.email}</div>}
-  <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Phone" className="p-2 border rounded" />
-  {/* location field removed */}
-  <input value={password} onChange={e=>setPassword(e.target.value)} type="password" placeholder="Password" className="p-2 border rounded" />
+  <input value={phone} onChange={e=>{ setPhone(e.target.value); onFieldDirty && onFieldDirty(); }} placeholder="Phone" className="p-2 border rounded" />
+  <input value={password} onChange={e=>{ setPassword(e.target.value); onFieldDirty && onFieldDirty(); }} type="password" placeholder="Password" className="p-2 border rounded" />
   {fieldErrors.password && <div className="text-red-500 text-sm">{fieldErrors.password}</div>}
-  <input value={confirm} onChange={e=>setConfirm(e.target.value)} type="password" placeholder="Confirm password" className="p-2 border rounded" />
+  <input value={confirm} onChange={e=>{ setConfirm(e.target.value); onFieldDirty && onFieldDirty(); }} type="password" placeholder="Confirm password" className="p-2 border rounded" />
   {fieldErrors.confirm && <div className="text-red-500 text-sm">{fieldErrors.confirm}</div>}
       <div className="flex gap-4 items-center">
         <label className="font-medium">Role:</label>
-        <select value={role} onChange={e=>setRole(e.target.value)} className="border rounded p-2">
+  <select value={role} onChange={e=>{ setRole(e.target.value); onFieldDirty && onFieldDirty(); }} className="border rounded p-2">
           <option value="user">User</option>
           <option value="admin">Admin</option>
         </select>
@@ -208,7 +196,6 @@ export default function SignupForm({ onSuccess }){
       <button type="button" className="p-2 bg-red-500 text-white rounded mt-2" onClick={handleGoogleSignup}>
         Sign Up with Google
       </button>
-      {/* Fallback inline notice if modal is closed */}
       {verificationSent && !showVerificationModal && !auth.currentUser?.emailVerified && (
         <div className="mt-4 p-3 border rounded bg-yellow-50 text-sm text-gray-700">
           <div className="font-medium mb-1">Verify your email</div>
@@ -223,15 +210,12 @@ export default function SignupForm({ onSuccess }){
         </div>
       )}
 
-      {/* Verification Sent Modal */}
       {showVerificationModal && verificationSent && !auth.currentUser?.emailVerified && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/50"
             onClick={() => setShowVerificationModal(false)}
           />
-          {/* Modal Card */}
           <div className="relative z-10 mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
             <div className="mb-3 flex items-start justify-between">
               <h3 className="text-lg font-semibold text-gray-900">Check your email</h3>

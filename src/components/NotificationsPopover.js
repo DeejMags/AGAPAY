@@ -24,12 +24,27 @@ function displayName(u) {
   return u.username || u.name || (u.email ? String(u.email).split('@')[0] : 'User');
 }
 
-export default function NotificationsPopover({ open, onClose }) {
+export default function NotificationsPopover({ open, onClose, adminCounts = null }) {
   const navigate = useNavigate();
   const [tab, setTab] = useState('all'); // 'all' | 'unread'
   const [items, setItems] = useState([]); // { id, otherId, otherName, otherAvatar, text, ts, unread }
   const [profileCache, setProfileCache] = useState({});
+  const [systemNotifs, setSystemNotifs] = useState([]); // admin system notifications
+  const [adminSummary, setAdminSummary] = useState({ pendingProducts: 0, openReports: 0 });
+  const [loadingAdmin, setLoadingAdmin] = useState(false);
   const meId = (auth && auth.currentUser && auth.currentUser.uid) || (JSON.parse(localStorage.getItem('user') || 'null')?.id) || null;
+  const currentUser = JSON.parse(localStorage.getItem('user') || 'null');
+  const isAdmin = currentUser && currentUser.role === 'admin';
+
+  function toMillis(ts) {
+    if (!ts) return Date.now();
+    if (typeof ts === 'number' && Number.isFinite(ts)) return ts;
+    if (ts.toDate) return ts.toDate().getTime();
+    if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+    if (typeof ts._seconds === 'number') return ts._seconds * 1000;
+    const parsed = Date.parse(ts);
+    return Number.isNaN(parsed) ? Date.now() : parsed;
+  }
 
   // Subscribe to conversations and map to notification items
   useEffect(() => {
@@ -81,6 +96,79 @@ export default function NotificationsPopover({ open, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, meId]);
 
+  useEffect(() => {
+    if (isAdmin && adminCounts) {
+      setAdminSummary(prev => {
+        if (prev.pendingProducts === adminCounts.pendingProducts && prev.openReports === adminCounts.openReports) return prev;
+        return { pendingProducts: adminCounts.pendingProducts || 0, openReports: adminCounts.openReports || 0 };
+      });
+    }
+  }, [adminCounts, isAdmin]);
+
+  useEffect(() => {
+    if (!open || !isAdmin) {
+      setSystemNotifs([]);
+      setAdminSummary({ pendingProducts: 0, openReports: 0 });
+      return;
+    }
+    let cancelled = false;
+    async function loadAdminNotifications() {
+      setLoadingAdmin(true);
+      try {
+        const [prodRes, reportRes] = await Promise.all([
+          authFetch('/api/products?admin=true&status=pending&pageSize=100').catch(() => null),
+          authFetch('/api/reports').catch(() => null)
+        ]);
+        let pendingProducts = [];
+        let openReports = [];
+        if (prodRes && prodRes.ok) {
+          const data = await prodRes.json();
+          const items = Array.isArray(data) ? data : (data.items || []);
+          pendingProducts = items;
+        }
+        if (reportRes && reportRes.ok) {
+          const data = await reportRes.json();
+          const items = Array.isArray(data) ? data : (data.items || []);
+          openReports = items.filter(r => {
+            const status = String(r.status || 'open').toLowerCase();
+            return status !== 'resolved' && status !== 'closed';
+          });
+        }
+        if (cancelled) return;
+        const productNotifs = pendingProducts.map(p => ({
+          id: `product:${p.id}`,
+          otherName: 'Product awaiting review',
+          text: `${(p.seller && (p.seller.name || p.seller.email)) || p.sellerName || 'Seller'} uploaded ${p.title || 'a product'}`,
+          ts: toMillis(p.createdAt),
+          unread: true,
+          icon: '📦',
+          targetSection: 'products',
+        }));
+        const reportNotifs = openReports.map(r => ({
+          id: `report:${r.id}`,
+          otherName: r.reporterEmail || r.reporterName || 'New report',
+          text: r.reason || 'New user report submitted',
+          ts: toMillis(r.createdAt),
+          unread: true,
+          icon: '🚨',
+          targetSection: 'report',
+        }));
+        const combined = [...productNotifs, ...reportNotifs].sort((a,b) => (b.ts || 0) - (a.ts || 0));
+        setSystemNotifs(combined);
+        setAdminSummary({ pendingProducts: pendingProducts.length, openReports: openReports.length });
+      } catch (err) {
+        if (!cancelled) {
+          setSystemNotifs([]);
+          setAdminSummary({ pendingProducts: 0, openReports: 0 });
+        }
+      } finally {
+        if (!cancelled) setLoadingAdmin(false);
+      }
+    }
+    loadAdminNotifications();
+    return () => { cancelled = true; };
+  }, [open, isAdmin]);
+
   // Apply tab filtering
   const filtered = useMemo(() => {
     const enrich = (it) => ({
@@ -88,10 +176,10 @@ export default function NotificationsPopover({ open, onClose }) {
       otherName: it.otherId && profileCache[it.otherId] ? displayName(profileCache[it.otherId]) : it.otherName,
       otherAvatar: it.otherId && profileCache[it.otherId] ? (profileCache[it.otherId].profilePic || profileCache[it.otherId].avatar || null) : it.otherAvatar,
     });
-    const base = items.map(enrich);
+    const base = [...systemNotifs, ...items.map(enrich)];
     if (tab === 'unread') return base.filter(i => i.unread);
     return base;
-  }, [items, profileCache, tab]);
+  }, [items, profileCache, systemNotifs, tab]);
 
   if (!open) return null;
 
@@ -107,10 +195,24 @@ export default function NotificationsPopover({ open, onClose }) {
           <button type="button" className={`ml-1 px-3 py-1 rounded-md ${tab==='unread' ? 'bg-white shadow font-medium' : 'text-gray-600'}`} onClick={()=>setTab('unread')}>Unread</button>
         </div>
       </div>
+      {isAdmin && (
+        <div className="px-4 py-2 text-xs text-gray-600 bg-teal-50 flex justify-between border-b border-teal-100">
+          <span>Pending products: {adminSummary.pendingProducts}</span>
+          <span>Open reports: {adminSummary.openReports}</span>
+        </div>
+      )}
       <div className="max-h-96 overflow-auto divide-y">
+        {loadingAdmin && isAdmin && (
+          <div className="px-4 py-2 text-center text-xs text-gray-500">Updating admin notifications…</div>
+        )}
         {filtered.length ? filtered.map(n => (
           <button type="button" key={n.id}
             onClick={() => {
+              if (n.targetSection) {
+                onClose && onClose();
+                navigate('/admin', { state: { adminSection: n.targetSection } });
+                return;
+              }
               // When a notification is clicked, open Messages and preselect conversation
               localStorage.setItem('agapay_active_conv', String(n.id));
               onClose && onClose();
@@ -120,7 +222,13 @@ export default function NotificationsPopover({ open, onClose }) {
           >
             <div className="relative">
               <div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center">
-                {n.otherAvatar ? <img src={n.otherAvatar} alt={n.otherName} className="w-full h-full object-cover" /> : <span className="text-gray-500">👤</span>}
+                {n.otherAvatar ? (
+                  <img src={n.otherAvatar} alt={n.otherName} className="w-full h-full object-cover" />
+                ) : n.icon ? (
+                  <span className="text-lg" role="img" aria-hidden="true">{n.icon}</span>
+                ) : (
+                  <span className="text-gray-500">👤</span>
+                )}
               </div>
               {n.unread && <span className="absolute -bottom-0 -right-0 translate-x-1/4 translate-y-1/4 w-2.5 h-2.5 bg-teal-600 rounded-full ring-2 ring-white" />}
             </div>

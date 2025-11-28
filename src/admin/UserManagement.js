@@ -9,7 +9,7 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [confirmMode, setConfirmMode] = useState(null); // 'ban' | 'delete'
-  const [typedConfirm, setTypedConfirm] = useState('');
+  // Removed typed delete confirmation; immediate delete now
 
   // Toast / notification
   const [notifyOpen, setNotifyOpen] = useState(false);
@@ -21,9 +21,11 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
   // Helper to consistently compute a user's display name
   const getDisplayName = (u) => {
     if (!u) return '';
-    // Prefer explicit name fields; include first/last name support
     const combined = [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
-    const name = combined || u.username || u.name || u.displayName || u.fullName || (u.email ? String(u.email).split('@')[0] : '');
+    let name = combined || u.username || u.name || u.displayName || u.fullName || (u.email ? String(u.email).split('@')[0] : '');
+    if (!name || !name.trim()) {
+      name = (u.email ? String(u.email).split('@')[0] : '') || String(u.id || '').slice(0, 12);
+    }
     return name;
   };
 
@@ -181,14 +183,12 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
   function openBanConfirm(id) {
     setConfirmMode('ban');
     setConfirmTarget(id);
-    setTypedConfirm('');
     setConfirmOpen(true);
   }
 
   function openDeleteConfirm(id) {
     setConfirmMode('delete');
     setConfirmTarget(id);
-    setTypedConfirm('');
     setConfirmOpen(true);
   }
 
@@ -319,19 +319,14 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
       <Modal
         open={confirmOpen && !!confirmTarget}
         title={confirmMode === 'delete' ? 'Confirm deletion' : 'Confirm ban'}
-        onCancel={() => { setConfirmOpen(false); setConfirmTarget(null); setConfirmMode(null); setTypedConfirm(''); }}
+  onCancel={() => { setConfirmOpen(false); setConfirmTarget(null); setConfirmMode(null); }}
         onConfirm={async () => {
           const id = confirmTarget;
           const mode = confirmMode;
           // require typed confirmation for delete
-          if (mode === 'delete' && typedConfirm.trim() !== 'DELETE') {
-            setNotifyText('Type DELETE to confirm'); setNotifySuccess(false); setNotifyOpen(true);
-            return;
-          }
           setConfirmOpen(false);
           setConfirmTarget(null);
           setConfirmMode(null);
-          setTypedConfirm('');
           if (!id) return;
           if (mode === 'ban') return await handleBan(id);
           return await handleDelete(id);
@@ -346,8 +341,7 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
             return (
               <>
                 <div className="mb-2">You are about to permanently delete <strong>{displayName}</strong>. This action cannot be undone.</div>
-                <div>Type <strong>DELETE</strong> in the box below to confirm permanent deletion of this user.</div>
-                <input autoFocus className="mt-3 w-full border rounded p-2" value={typedConfirm} onChange={e => setTypedConfirm(e.target.value)} placeholder="Type DELETE to confirm" />
+                <div className="text-sm text-red-600">Click "Delete user" to proceed.</div>
               </>
             );
           }

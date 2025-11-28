@@ -275,3 +275,46 @@ export function subscribeToUserConversations(userId, callback) {
   }, err => console.error('Realtime user convs error', err));
   return unsub;
 }
+
+// Delete a conversation (backend preferred). Returns true if deleted.
+export async function deleteConversation(conversationId, opts = {}) {
+  if (!conversationId) return false;
+  // Try backend hard delete first
+  try {
+    if (typeof authFetch === 'function') {
+      const q = opts.soft ? '?soft=1' : '';
+      const res = await authFetch(`/api/messages/${encodeURIComponent(conversationId)}${q}`, { method: 'DELETE' });
+      if (res.ok) return true;
+    }
+  } catch (e) { /* fallback */ }
+  // Fallback: client-side Firestore delete (hard)
+  try {
+    const convRef = doc(db, 'conversation', conversationId);
+    const convSnap = await getDoc(convRef);
+    if (!convSnap.exists()) return false;
+    // Delete messages subcollection in batches
+    try {
+      const msgsCol = collection(convRef, 'messages');
+      const msgsSnap = await getDocs(msgsCol);
+      if (!msgsSnap.empty) {
+        // Firestore web SDK writeBatch import on demand
+        const { writeBatch } = await import('firebase/firestore');
+        let batch = writeBatch(db);
+        let count = 0;
+        for (const d of msgsSnap.docs) {
+          batch.delete(d.ref);
+          count++;
+          if (count >= 450) { await batch.commit(); batch = writeBatch(db); count = 0; }
+        }
+        if (count > 0) await batch.commit();
+      }
+    } catch (e) { /* ignore message deletes */ }
+    // Delete conversation doc
+    const { deleteDoc } = await import('firebase/firestore');
+    await deleteDoc(convRef);
+    return true;
+  } catch (err) {
+    console.error('deleteConversation fallback error', err);
+    return false;
+  }
+}

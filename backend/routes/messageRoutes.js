@@ -31,5 +31,7 @@ router.post('/send', auth, controller.sendMessage);
 router.post('/:id/read', auth, controller.markRead);
 // Multipart upload for message images
 router.post('/upload', auth, upload.single('file'), controller.uploadMessageImage);
+// Delete conversation
+router.delete('/:id', auth, controller.deleteConversation);
 
 module.exports = router;

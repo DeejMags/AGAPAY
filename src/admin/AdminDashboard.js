@@ -12,8 +12,8 @@ import Settings from './Settings';
 import { getAllProducts } from '../firebaseProductService';
 import { db } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';
+import { useLocation } from 'react-router-dom';
 
-// Dashboard state initial values (no demo data)
 const initialUsers = [];
 const initialOrders = [];
 const initialNotifications = [];
@@ -22,16 +22,17 @@ const initialPoints = [];
 export default function AdminDashboard() {
   const [activePage, setActivePage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const location = useLocation();
+  const validPages = React.useMemo(() => new Set(['dashboard', 'users', 'products', 'orders', 'report', 'points', 'notifications', 'settings']), []);
+  const lastSectionRef = React.useRef(null);
   const [users, setUsers] = useState(initialUsers);
   const [products, setProducts] = useState([]);
   React.useEffect(() => {
     async function loadProducts() {
       try {
-        // Try backend first — request admin view so dashboard shows pending/denied items and seller info
         const res = await fetch('/api/products?admin=true&includeSeller=true');
         if (res.ok) {
           const data = await res.json();
-          // Backend may return a paged object { items: [...], page, pageSize }
           const items = Array.isArray(data) ? data : (data.items || []);
           setProducts(items);
           return;
@@ -40,7 +41,6 @@ export default function AdminDashboard() {
         console.warn('Backend products fetch failed, using client Firestore:', err.message);
       }
       
-      // Fallback to client-side Firestore
       try {
         const data = await getAllProducts();
         setProducts(data);
@@ -53,7 +53,6 @@ export default function AdminDashboard() {
     loadProducts();
   }, []);
 
-  // Fetch users: try backend first, then fallback to client Firestore
   React.useEffect(() => {
     async function loadUsers() {
       try {
@@ -67,7 +66,6 @@ export default function AdminDashboard() {
         console.warn('Backend users fetch failed, using client Firestore:', err.message);
       }
       
-      // Fallback to client-side Firestore
       try {
         const qs = await getDocs(collection(db, 'users'));
         const list = qs.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -85,10 +83,8 @@ export default function AdminDashboard() {
   const [notifications, setNotifications] = useState(initialNotifications);
   const [points, setPoints] = useState(initialPoints);
 
-  // Load reports for sidebar badge (count open/in_review)
   const loadReports = React.useCallback(async () => {
     try {
-      // Avoid calling before auth is available to reduce 401 noise
       const { auth } = await import('../firebase');
       if (!auth.currentUser) return;
       const res = await authFetch('/api/reports');
@@ -104,10 +100,8 @@ export default function AdminDashboard() {
     }
   }, []);
 
-  // Initial load
   React.useEffect(() => { loadReports(); }, [loadReports]);
 
-  // Refresh when returning to dashboard/report, or when tab visibility changes
   React.useEffect(() => {
     if (activePage === 'dashboard' || activePage === 'report') {
       loadReports();
@@ -115,11 +109,21 @@ export default function AdminDashboard() {
   }, [activePage, loadReports]);
 
   React.useEffect(() => {
+    const stateSection = location && location.state && location.state.adminSection;
+    const params = location ? new URLSearchParams(location.search || '') : null;
+    const querySection = params ? params.get('section') : null;
+    const target = stateSection || querySection;
+    if (!target || target === lastSectionRef.current) return;
+    if (!validPages.has(target)) return;
+    lastSectionRef.current = target;
+    setActivePage(target);
+  }, [location, validPages]);
+
+  React.useEffect(() => {
     const onVis = () => { if (document.visibilityState === 'visible') loadReports(); };
     const onChanged = () => loadReports();
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('reports-changed', onChanged);
-    // light polling as a fallback every 45s
     const id = window.setInterval(loadReports, 45000);
     return () => {
       document.removeEventListener('visibilitychange', onVis);
@@ -130,7 +134,6 @@ export default function AdminDashboard() {
 
 
 
-  // Main render logic
   function renderPage() {
     switch (activePage) {
       case 'dashboard':
@@ -154,29 +157,28 @@ export default function AdminDashboard() {
     }
   }
 
-  // Responsive layout
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-teal-100 via-white to-gray-100 ml-[-12px] sm:ml-[-16px]">
-      {/* Mobile hamburger */}
       <button
         type="button"
-        className="md:hidden fixed top-3 left-3 z-50 rounded-md bg-white/90 border border-gray-200 p-2 shadow"
-        aria-label="Open menu"
-        onClick={() => setSidebarOpen(true)}
+        className="lg:hidden fixed top-3 left-3 z-50 rounded-md bg-white/90 border border-gray-200 w-11 h-11 flex flex-col justify-center items-center shadow transition-colors hover:bg-gray-50"
+        aria-label={sidebarOpen ? 'Close menu' : 'Open menu'}
+        aria-expanded={sidebarOpen ? 'true' : 'false'}
+        onClick={() => setSidebarOpen(v => !v)}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="#036c5f"><path d="M3 6h18v2H3V6Zm0 5h18v2H3v-2Zm0 5h18v2H3v-2Z"/></svg>
+        <span className={`block w-6 h-0.5 bg-teal-700 mb-1 transform transition duration-300 ${sidebarOpen ? 'translate-y-1.5 rotate-45' : ''}`}></span>
+        <span className={`block w-6 h-0.5 bg-teal-700 mb-1 transition-opacity duration-300 ${sidebarOpen ? 'opacity-0' : 'opacity-100'}`}></span>
+        <span className={`block w-6 h-0.5 bg-teal-700 transform transition duration-300 ${sidebarOpen ? '-translate-y-1.5 -rotate-45' : ''}`}></span>
       </button>
 
-      {/* Desktop sidebar */}
-      <div className="hidden md:block">
+      <div className="hidden lg:block">
         <Sidebar activePage={activePage} setActivePage={setActivePage} className="h-screen sticky top-0" />
       </div>
 
-      {/* Mobile drawer */}
       {sidebarOpen && (
-        <div className="md:hidden fixed inset-0 z-40">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setSidebarOpen(false)} />
-          <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl">
+        <div className="lg:hidden fixed inset-0 z-40">
+          <div className="absolute inset-0 bg-black/40 animate-fadeIn" onClick={() => setSidebarOpen(false)} />
+          <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl transform animate-slideInLeft">
             <div className="flex items-center justify-between px-3 py-3 border-b">
               <div className="font-semibold text-teal-700">Menu</div>
               <button
@@ -194,9 +196,7 @@ export default function AdminDashboard() {
       )}
 
       <div className="flex-1 flex flex-col w-full">
-        {/* Tighter paddings to remove excessive gaps */}
         <main className="flex-1 p-3 sm:p-4 md:p-6">
-          {/* Render pages directly; individual pages provide their own containers */}
           {renderPage()}
         </main>
       </div>
