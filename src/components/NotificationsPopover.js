@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { auth } from '../firebase';
 import { subscribeToUserConversations } from '../firebaseMessageService';
 import authFetch from '../utils/authFetch';
+import { getBadgeIcon } from '../utils/badges';
 
 function timeAgo(ts) {
   const now = Date.now();
@@ -26,12 +27,14 @@ function displayName(u) {
 
 export default function NotificationsPopover({ open, onClose, adminCounts = null }) {
   const navigate = useNavigate();
-  const [tab, setTab] = useState('all'); // 'all' | 'unread'
-  const [items, setItems] = useState([]); // { id, otherId, otherName, otherAvatar, text, ts, unread }
+  const [tab, setTab] = useState('all'); 
+  const [items, setItems] = useState([]); 
   const [profileCache, setProfileCache] = useState({});
-  const [systemNotifs, setSystemNotifs] = useState([]); // admin system notifications
+  const [systemNotifs, setSystemNotifs] = useState([]); 
   const [adminSummary, setAdminSummary] = useState({ pendingProducts: 0, openReports: 0 });
   const [loadingAdmin, setLoadingAdmin] = useState(false);
+  const [badgeFeed, setBadgeFeed] = useState([]);
+  const [badgeFeedLoading, setBadgeFeedLoading] = useState(false);
   const meId = (auth && auth.currentUser && auth.currentUser.uid) || (JSON.parse(localStorage.getItem('user') || 'null')?.id) || null;
   const currentUser = JSON.parse(localStorage.getItem('user') || 'null');
   const isAdmin = currentUser && currentUser.role === 'admin';
@@ -46,7 +49,6 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
     return Number.isNaN(parsed) ? Date.now() : parsed;
   }
 
-  // Subscribe to conversations and map to notification items
   useEffect(() => {
     if (!open || !meId) return;
     let unsub = null;
@@ -169,6 +171,43 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
     return () => { cancelled = true; };
   }, [open, isAdmin]);
 
+  useEffect(() => {
+    if (!open || !meId) {
+      setBadgeFeed([]);
+      return;
+    }
+    let cancelled = false;
+    async function loadBadgeFeed() {
+      setBadgeFeedLoading(true);
+      try {
+        const res = await authFetch(`/api/users/${encodeURIComponent(meId)}/badges/feed?limit=15`).catch(() => null);
+        if (!res || !res.ok) throw new Error('badge_feed_failed');
+        let data = {};
+        try { data = await res.json(); } catch (_) { data = {}; }
+        if (cancelled) return;
+        const list = Array.isArray(data?.items) ? data.items : [];
+        const mapped = list.map((item, idx) => {
+          const ts = Number(item.timestamp || Date.parse(item.createdAt)) || Date.now() - idx;
+          return {
+            id: `badge:${item.id || idx}`,
+            otherName: item.title || 'Badge update',
+            text: item.message || 'Badge progress update',
+            ts,
+            unread: true,
+            icon: getBadgeIcon(item.tier),
+          };
+        });
+        setBadgeFeed(mapped);
+      } catch (err) {
+        if (!cancelled) setBadgeFeed([]);
+      } finally {
+        if (!cancelled) setBadgeFeedLoading(false);
+      }
+    }
+    loadBadgeFeed();
+    return () => { cancelled = true; };
+  }, [open, meId]);
+
   // Apply tab filtering
   const filtered = useMemo(() => {
     const enrich = (it) => ({
@@ -176,10 +215,10 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
       otherName: it.otherId && profileCache[it.otherId] ? displayName(profileCache[it.otherId]) : it.otherName,
       otherAvatar: it.otherId && profileCache[it.otherId] ? (profileCache[it.otherId].profilePic || profileCache[it.otherId].avatar || null) : it.otherAvatar,
     });
-    const base = [...systemNotifs, ...items.map(enrich)];
+    const base = [...badgeFeed, ...systemNotifs, ...items.map(enrich)];
     if (tab === 'unread') return base.filter(i => i.unread);
     return base;
-  }, [items, profileCache, systemNotifs, tab]);
+  }, [badgeFeed, items, profileCache, systemNotifs, tab]);
 
   if (!open) return null;
 
@@ -204,6 +243,9 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
       <div className="max-h-96 overflow-auto divide-y">
         {loadingAdmin && isAdmin && (
           <div className="px-4 py-2 text-center text-xs text-gray-500">Updating admin notifications…</div>
+        )}
+        {badgeFeedLoading && (
+          <div className="px-4 py-2 text-center text-xs text-gray-500">Updating badge notifications…</div>
         )}
         {filtered.length ? filtered.map(n => (
           <button type="button" key={n.id}

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import RatingStars from '../components/RatingStars'
 import MapEmbed from '../components/MapEmbed'
@@ -6,6 +6,8 @@ import ProductCard from '../components/ProductCard'
 import authFetch from '../utils/authFetch'
 import FullScreenLoader from '../components/FullScreenLoader'
 import ReportModal from '../components/ReportModal'
+import { auth } from '../firebase'
+import { formatBadgeLabel, getBadgeIcon, normalizeBadgeTier, sanitizeBadgeList } from '../utils/badges'
 
 function mergeWithHint(base, hint) {
   if (!hint) return base;
@@ -29,6 +31,10 @@ export default function Profile(){
 
 function ProfileHeader({ me, onPicChange, menu }) {
   const displayName = me ? (me.username || me.name || me.displayName || me.fullName || (me.email ? String(me.email).split('@')[0] : 'User')) : 'User';
+  const unlocked = sanitizeBadgeList(me?.badgesUnlocked || []);
+  const fallbackTier = normalizeBadgeTier(me?.highestBadgeTier || me?.badgeTier) || (unlocked.length ? unlocked[unlocked.length - 1] : null);
+  const badgeVisible = me?.showBadgeOnProfile !== false;
+  const displayBadgeTier = badgeVisible ? (normalizeBadgeTier(me?.equippedBadge) || fallbackTier) : null;
   return (
     <div className="relative bg-white border rounded p-4 flex flex-col items-center">
       {/* Three-dots actions outside the portrait, top-right of the card */}
@@ -48,6 +54,12 @@ function ProfileHeader({ me, onPicChange, menu }) {
       <div className="text-sm text-gray-600">{me ? me.email : ''}</div>
       {me && me.phone && <div className="text-sm text-gray-600 mt-1">{me.phone}</div>}
       {me && me.location && <div className="text-sm text-gray-600 mt-1">{me.location}</div>}
+      {(badgeVisible && displayBadgeTier) && (
+        <div className="mt-3 flex items-center gap-2 px-3 py-1 bg-amber-50 border border-amber-200 rounded-full text-sm text-amber-800">
+          <span>{getBadgeIcon(displayBadgeTier)}</span>
+          <span>{formatBadgeLabel(displayBadgeTier)}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -74,6 +86,7 @@ function ProfileHeader({ me, onPicChange, menu }) {
   const [pendingComment, setPendingComment] = useState('')
   // Seller stats derived from products (sold count, distinct buyers)
   const [sellerStats, setSellerStats] = useState({ sold: 0, buyers: [], buyersResolved: [] })
+  const [badgeToggleStatus, setBadgeToggleStatus] = useState({ state: 'idle', error: '' })
 
   useEffect(() => {
     if (hintState) {
@@ -455,6 +468,59 @@ function ProfileHeader({ me, onPicChange, menu }) {
     return () => { cancelled = true; };
   }, [id]);
 
+  const storedUser = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem('user') || 'null');
+    } catch (_) {
+      return null;
+    }
+  }, []);
+
+  const viewerUid = auth && auth.currentUser ? auth.currentUser.uid : null;
+  const viewerEmail = auth && auth.currentUser ? auth.currentUser.email : null;
+  const viewerFallbackId = storedUser?.id || storedUser?.authId || null;
+
+  const isOwnProfile = useMemo(() => {
+    const matchesUid = viewerUid && (String(user?.id) === viewerUid || String(user?.authId) === viewerUid);
+    const matchesFallback = viewerFallbackId && (String(user?.id) === String(viewerFallbackId) || String(user?.authId) === String(viewerFallbackId));
+    const matchesEmail = viewerEmail && user?.email && viewerEmail.toLowerCase() === String(user.email).toLowerCase();
+    return !id || matchesUid || matchesFallback || matchesEmail;
+  }, [id, user, viewerEmail, viewerFallbackId, viewerUid]);
+
+  const handleBadgeVisibilityToggle = async () => {
+    if (!isOwnProfile) return;
+    setBadgeToggleStatus({ state: 'saving', error: '' });
+    try {
+      const targetId = viewerUid || user?.id || user?.authId || viewerFallbackId;
+      if (!targetId) throw new Error('Unable to determine user id.');
+      const currentlyVisible = user?.showBadgeOnProfile !== false;
+      const nextVisible = !currentlyVisible;
+      const unlocked = sanitizeBadgeList(user?.badgesUnlocked || []);
+      const fallbackTier = unlocked.length ? unlocked[unlocked.length - 1] : null;
+      const candidateTier = nextVisible
+        ? (normalizeBadgeTier(user?.equippedBadge) || normalizeBadgeTier(user?.highestBadgeTier) || fallbackTier)
+        : null;
+      const body = { showOnProfile: nextVisible };
+      if (nextVisible && candidateTier) body.tier = candidateTier;
+      const res = await authFetch(`/api/users/${encodeURIComponent(targetId)}/badges/equip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      let data = {};
+      try { data = await res.json(); } catch (_) { data = {}; }
+      if (!res.ok) throw new Error(data.error || data.message || 'Unable to update badge visibility');
+      setUser(prev => ({ ...(prev || {}), ...data }));
+      try {
+        const latest = JSON.parse(localStorage.getItem('user') || 'null') || {};
+        localStorage.setItem('user', JSON.stringify({ ...latest, ...data }));
+      } catch (_) { /* ignore */ }
+      setBadgeToggleStatus({ state: 'success', error: '' });
+    } catch (err) {
+      setBadgeToggleStatus({ state: 'error', error: err.message || 'Unable to update badge visibility' });
+    }
+  };
+
   async function submitSellerReview() {
     if (!id || !pendingRating) return;
     try {
@@ -507,6 +573,13 @@ function ProfileHeader({ me, onPicChange, menu }) {
     </div>
   ) : null;
 
+  const sanitizedBadges = sanitizeBadgeList(user?.badgesUnlocked || []);
+  const fallbackBadgeTier = normalizeBadgeTier(user?.highestBadgeTier || user?.badgeTier) || (sanitizedBadges.length ? sanitizedBadges[sanitizedBadges.length - 1] : null);
+  const equippedTier = normalizeBadgeTier(user?.equippedBadge);
+  const profileBadgeVisible = user?.showBadgeOnProfile !== false;
+  const displayBadgeTier = (profileBadgeVisible || isOwnProfile) ? (equippedTier || fallbackBadgeTier) : null;
+  const badgeVisibilityCopy = profileBadgeVisible ? 'Visible on profile' : (isOwnProfile ? 'Hidden from profile' : 'Badge hidden by seller');
+
   return (
     <div className="py-8 container mx-auto px-4">
       <div className="flex flex-col md:flex-row gap-6">
@@ -515,7 +588,50 @@ function ProfileHeader({ me, onPicChange, menu }) {
           <ProfileHeader me={user} onPicChange={(u)=>{ setUser(u); }} menu={menu} />
 
           {/* View / Edit area under header */}
-          <div className="mt-4">
+          <div className="mt-4 space-y-4">
+            <div className="border rounded-lg bg-white shadow-sm p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs uppercase text-gray-500 font-semibold">Community badge</div>
+                  <div className="mt-1 flex items-center gap-2 text-base font-semibold text-gray-800">
+                    {displayBadgeTier ? (
+                      <>
+                        <span>{getBadgeIcon(displayBadgeTier)}</span>
+                        <span>{formatBadgeLabel(displayBadgeTier)}</span>
+                      </>
+                    ) : (
+                      <span>No badge yet</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">{badgeVisibilityCopy}</div>
+                </div>
+                {isOwnProfile && (
+                  <button
+                    type="button"
+                    onClick={handleBadgeVisibilityToggle}
+                    disabled={badgeToggleStatus.state === 'saving'}
+                    className={`px-3 py-1.5 rounded-full text-sm font-semibold border transition ${
+                      profileBadgeVisible ? 'border-amber-300 text-amber-700 hover:bg-amber-50' : 'border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                    } ${badgeToggleStatus.state === 'saving' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  >
+                    {profileBadgeVisible ? 'Hide badge' : 'Show badge'}
+                  </button>
+                )}
+              </div>
+              {(sanitizedBadges.length > 0 && (profileBadgeVisible || isOwnProfile)) && (
+                <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                  {sanitizedBadges.map(tier => (
+                    <span key={tier} className="px-2 py-1 rounded-full border border-amber-200 text-amber-800 bg-amber-50 flex items-center gap-1">
+                      <span className="text-sm">{getBadgeIcon(tier)}</span>
+                      <span>{formatBadgeLabel(tier)}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {badgeToggleStatus.error && (
+                <div className="text-xs text-red-600 mt-2">{badgeToggleStatus.error}</div>
+              )}
+            </div>
             {/* Only show rating stars if user is a seller (has listings); omit duplicate name/email below the profile card */}
             {/* Rating summary */}
             {id ? (

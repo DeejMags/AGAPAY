@@ -12,12 +12,11 @@ import Toast from '../components/Toast';
 export default function SellerDashboard() {
   const [user, setUser] = useState(null);
   const [listings, setListings] = useState([]);
-  const [stats, setStats] = useState({ points: 0, active: 0, views: 0, sold: 0 });
+  const [stats, setStats] = useState({ points: 0, active: 0, sold: 0 });
   const [modalOpen, setModalOpen] = useState(false);
   const [view, setView] = useState('dashboard'); // dashboard, listings, orders, messages, analytics, impact
   const [loadingView, setLoadingView] = useState(false);
   const [editItem, setEditItem] = useState(null);
-  const [categoryViews, setCategoryViews] = useState({});
   const [busy, setBusy] = useState(false); // blocks actions and shows fullscreen loader during network ops
   const [markSoldOpen, setMarkSoldOpen] = useState(false);
   const [markSoldProduct, setMarkSoldProduct] = useState(null);
@@ -120,34 +119,6 @@ export default function SellerDashboard() {
         // ignore
       }
     })();
-    // Load per-user category views for dashboard widget
-    (async () => {
-      try {
-        const { auth, db } = await import('../firebase');
-        const uid = (auth && auth.currentUser && auth.currentUser.uid) || u?.id || null;
-        if (!uid) {
-          // localStorage fallback
-          const map = JSON.parse(localStorage.getItem('agapay_category_views') || '{}');
-          setCategoryViews(map);
-          const total = Object.values(map).reduce((a,b)=> a + (Number(b)||0), 0);
-          setStats(prev => ({ ...prev, views: total }));
-          return;
-        }
-        const { doc, getDoc } = await import('firebase/firestore');
-        const ref = doc(db, 'user_metrics', uid);
-        const snap = await getDoc(ref);
-        const data = snap.exists() ? snap.data() : {};
-        const cv = data.categoryViews || {};
-        setCategoryViews(cv);
-        const total = Object.values(cv).reduce((a,b)=> a + (Number(b)||0), 0);
-        setStats(prev => ({ ...prev, views: total }));
-      } catch (e) {
-        const map = JSON.parse(localStorage.getItem('agapay_category_views') || '{}');
-        setCategoryViews(map);
-        const total = Object.values(map).reduce((a,b)=> a + (Number(b)||0), 0);
-        setStats(prev => ({ ...prev, views: total }));
-      }
-    })();
     // Listen for product updates from admin and refresh listings
     const onProductUpdated = () => { loadListings(); };
     window.addEventListener('product-updated', onProductUpdated);
@@ -236,7 +207,7 @@ export default function SellerDashboard() {
             <section className="mb-8">
               <h2 className="text-2xl font-bold mb-4">Your Marketplace</h2>
               <p className="text-gray-600 mb-6">Manage your listings and track your impact</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 mb-6">
                 <div className="bg-white rounded-lg shadow p-6 flex flex-col items-start">
                   <div className="text-xs text-gray-500 mb-1">Points</div>
                   <div className="text-2xl font-bold">{stats.points.toLocaleString()} pts</div>
@@ -244,23 +215,6 @@ export default function SellerDashboard() {
                 <div className="bg-white rounded-lg shadow p-6 flex flex-col items-start">
                   <div className="text-xs text-gray-500 mb-1">Active Listings</div>
                   <div className="text-2xl font-bold">{stats.active}</div>
-                </div>
-                <div className="bg-white rounded-lg shadow p-6 flex flex-col items-start w-full">
-                  <div className="text-xs text-gray-500 mb-1">Views</div>
-                  <div className="text-2xl font-bold">{stats.views.toLocaleString()}</div>
-                  {categoryViews && Object.keys(categoryViews).length > 0 && (
-                    <ul className="mt-2 w-full text-xs text-gray-600 grid grid-cols-1 gap-y-1">
-                      {Object.entries(categoryViews)
-                        .sort((a,b)=> (Number(b[1])||0) - (Number(a[1])||0))
-                        .slice(0,4)
-                        .map(([k,v]) => (
-                          <li key={k} className="flex justify-between w-full">
-                            <span className="capitalize truncate">{k.replace(/_/g,' ')}</span>
-                            <span className="font-medium ml-2">{Number(v) || 0}</span>
-                          </li>
-                        ))}
-                    </ul>
-                  )}
                 </div>
                 <div className="bg-white rounded-lg shadow p-6 flex flex-col items-start">
                   <div className="text-xs text-gray-500 mb-1">Items Sold</div>
@@ -512,13 +466,18 @@ export default function SellerDashboard() {
           open={markSoldOpen}
           product={markSoldProduct}
           onClose={()=>{ setMarkSoldOpen(false); setMarkSoldProduct(null); }}
-          onMarked={({ productId, sellerPoints, alreadyAwarded }) => {
+          onMarked={({ productId, sellerPoints, alreadyAwarded, badgeNotifications }) => {
             // update product status to sold and bump points
             setListings(prev => prev.map(p => (p.id === productId || p._id === productId) ? { ...p, status: 'sold' } : p));
             if (!alreadyAwarded) {
               setStats(prev => ({ ...prev, points: (Number(prev.points)||0) + (Number(sellerPoints)||0) }));
             }
-            const message = alreadyAwarded ? 'Sale recorded. Points already awarded previously.' : `Sale recorded. You earned +${sellerPoints} pts!`;
+            const baseMessage = alreadyAwarded ? 'Sale recorded. Points already awarded previously.' : `Sale recorded. You earned +${sellerPoints} pts!`;
+            const sellerBadgeNotes = Array.isArray(badgeNotifications?.seller) ? badgeNotifications.seller : [];
+            const badgeMessage = sellerBadgeNotes.length
+              ? `Unlocked ${sellerBadgeNotes.map(note => note.label || 'a badge').join(', ')} badge${sellerBadgeNotes.length > 1 ? 's' : ''}!`
+              : '';
+            const message = [baseMessage, badgeMessage].filter(Boolean).join(' ');
             setToast({ open: true, message, variant: 'success' });
           }}
         />

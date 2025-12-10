@@ -1,4 +1,71 @@
 const { admin, db } = require('../config/firebaseAdmin');
+const cloudinary = require('../config/cloudinary');
+const { sanitizeUnlocked, isValidBadgeTier, BADGE_THRESHOLDS, badgeLabelFromTier } = require('../config/badges');
+
+function isAdminUser(user = {}) {
+  if (!user || typeof user !== 'object') return false;
+  const roles = Array.isArray(user.roles) ? user.roles : [];
+  const claims = user.customClaims || {};
+  return Boolean(
+    user.isAdmin ||
+    user.admin ||
+    user.role === 'admin' ||
+    roles.includes('admin') ||
+    claims.isAdmin ||
+    claims.admin ||
+    claims.role === 'admin'
+  );
+}
+
+function matchesUserIdentity(user = {}, identifier) {
+  if (!identifier) return false;
+  const needle = String(identifier).trim();
+  const candidates = [user.id, user.uid, user.authId]
+    .filter(Boolean)
+    .map(value => String(value).trim());
+  return candidates.includes(needle);
+}
+
+async function findUserDocument(usersCol, identifier) {
+  const key = String(identifier || '').trim();
+  if (!key) return null;
+
+  let ref = usersCol.doc(key);
+  let snapshot = await ref.get();
+  if (snapshot && snapshot.exists) return { ref, snapshot };
+
+  const byAuth = await usersCol.where('authId', '==', key).limit(1).get();
+  if (!byAuth.empty) {
+    const doc = byAuth.docs[0];
+    return { ref: doc.ref, snapshot: doc };
+  }
+
+  if (key.includes('@')) {
+    const byEmail = await usersCol.where('email', '==', key).limit(1).get();
+    if (!byEmail.empty) {
+      const doc = byEmail.docs[0];
+      return { ref: doc.ref, snapshot: doc };
+    }
+    const lower = key.toLowerCase();
+    if (lower !== key) {
+      const byLower = await usersCol.where('email', '==', lower).limit(1).get();
+      if (!byLower.empty) {
+        const doc = byLower.docs[0];
+        return { ref: doc.ref, snapshot: doc };
+      }
+    }
+  }
+
+  return null;
+}
+
+function normalizeBadgeSelection(value) {
+  if (value === undefined || value === null) return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized || normalized === 'none' || normalized === 'null') return null;
+  return normalized;
+}
+
 
 exports.getAllUsers = async (req, res) => {
   try {
@@ -72,11 +139,351 @@ exports.getUserById = async (req, res) => {
 
 exports.updateUser = async (req, res) => {
   try {
-    const data = req.body;
-    await db.collection('users').doc(req.params.id).update(data);
-    res.json({ id: req.params.id, ...data });
+    const incomingId = String(req.params.id || '').trim();
+  const payload = { ...(req.body || {}) };
+  if (payload.email) payload.email = String(payload.email).trim();
+  if (payload.phone) payload.phone = String(payload.phone).trim();
+  if (payload.name) payload.name = String(payload.name).trim();
+  if (payload.location) payload.location = String(payload.location).trim();
+
+    // Always update timestamps on profile saves
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    if (!payload.updatedAt) payload.updatedAt = stamp;
+
+    const usersCol = db.collection('users');
+    let targetRef = usersCol.doc(incomingId);
+    let snapshot = incomingId ? await targetRef.get() : null;
+
+    // Try matching by authId when the Firestore doc id differs from Firebase UID
+    if ((!snapshot || !snapshot.exists) && incomingId) {
+      const byAuth = await usersCol.where('authId', '==', incomingId).limit(1).get();
+      if (!byAuth.empty) {
+        targetRef = byAuth.docs[0].ref;
+        snapshot = byAuth.docs[0];
+      }
+    }
+
+    // Try matching by email when provided
+    if ((!snapshot || !snapshot.exists) && payload.email) {
+      const byEmail = await usersCol.where('email', '==', payload.email).limit(1).get();
+      if (!byEmail.empty) {
+        targetRef = byEmail.docs[0].ref;
+        snapshot = byEmail.docs[0];
+      } else if (payload.email.toLowerCase && payload.email.toLowerCase() !== payload.email) {
+        const byLower = await usersCol.where('email', '==', payload.email.toLowerCase()).limit(1).get();
+        if (!byLower.empty) {
+          targetRef = byLower.docs[0].ref;
+          snapshot = byLower.docs[0];
+        }
+      }
+    }
+
+    let existingData = snapshot && snapshot.exists ? snapshot.data() : null;
+
+    // Handle profile photo uploads/removals via Cloudinary when provided
+    const rawPic = typeof payload.profilePic === 'string' ? payload.profilePic.trim() : payload.profilePic;
+    const wantsRemoval = rawPic === '' || rawPic === null;
+    const isDataUri = typeof rawPic === 'string' && rawPic.startsWith('data:image');
+    if (wantsRemoval) {
+      if (existingData && existingData.profilePicPublicId && cloudinary && process.env.CLOUDINARY_CLOUD_NAME) {
+        try {
+          await cloudinary.uploader.destroy(existingData.profilePicPublicId, { invalidate: true });
+        } catch (e) {
+          console.warn('Failed to delete Cloudinary profile image', e?.message || e);
+        }
+      }
+      payload.profilePic = admin.firestore.FieldValue.delete();
+      payload.profilePicPublicId = admin.firestore.FieldValue.delete();
+    } else if (isDataUri) {
+      if (!cloudinary || !process.env.CLOUDINARY_CLOUD_NAME) {
+        throw new Error('cloudinary_not_configured');
+      }
+      const folder = process.env.CLOUDINARY_PROFILE_FOLDER || process.env.CLOUDINARY_FOLDER || 'agapay/users';
+      const uploadOpts = { invalidate: true, overwrite: true };
+      if (existingData && existingData.profilePicPublicId) uploadOpts.public_id = existingData.profilePicPublicId;
+      else uploadOpts.folder = folder;
+      const uploadRes = await cloudinary.uploader.upload(rawPic, uploadOpts);
+      payload.profilePic = uploadRes.secure_url;
+      payload.profilePicPublicId = uploadRes.public_id;
+    } else if (typeof rawPic === 'string' && rawPic.startsWith('http')) {
+      if (!payload.profilePicPublicId && existingData && existingData.profilePic === rawPic) {
+        payload.profilePicPublicId = existingData.profilePicPublicId || null;
+      }
+    } else if (rawPic === undefined) {
+      delete payload.profilePic;
+    }
+
+    // If still not found, create or merge into the document keyed by incomingId
+    if (!snapshot || !snapshot.exists) {
+      const baseCreate = {
+        authId: payload.authId || incomingId || null,
+        createdAt: stamp,
+      };
+      await targetRef.set({ ...baseCreate, ...payload }, { merge: true });
+      const created = await targetRef.get();
+      return res.json({ id: targetRef.id, ...(created.data() || {}) });
+    }
+
+    await targetRef.set(payload, { merge: true });
+    const updated = await targetRef.get();
+    res.json({ id: targetRef.id, ...(updated.data() || {}) });
   } catch (err) {
     console.error('Error updating user:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.setEquippedBadge = async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+
+    const targetId = String(req.params.id || '').trim();
+    if (!targetId) return res.status(400).json({ error: 'user_id_required' });
+
+    const allowAdmin = isAdminUser(req.user);
+    const isSelf = matchesUserIdentity(req.user, targetId);
+    if (!allowAdmin && !isSelf) return res.status(403).json({ error: 'forbidden' });
+
+    const body = req.body || {};
+    const tierKeys = ['tier', 'badge', 'equippedBadge', 'value'];
+    const tierProvided = tierKeys.some(key => Object.prototype.hasOwnProperty.call(body, key));
+    const requestedTier = normalizeBadgeSelection(body.tier ?? body.badge ?? body.equippedBadge ?? body.value ?? null);
+    if (requestedTier && !isValidBadgeTier(requestedTier)) {
+      return res.status(400).json({ error: 'invalid_badge_tier' });
+    }
+    const visibilityKeys = ['showOnProfile', 'showBadgeOnProfile', 'show', 'visible', 'visibility'];
+    const visibilityProvided = visibilityKeys.some(key => Object.prototype.hasOwnProperty.call(body, key));
+    let showOnProfile = undefined;
+    if (visibilityProvided) {
+      const rawVisibility = body.showOnProfile ?? body.showBadgeOnProfile ?? body.show ?? body.visible ?? body.visibility;
+      showOnProfile = Boolean(rawVisibility);
+    }
+
+    const usersCol = db.collection('users');
+    const resolved = await findUserDocument(usersCol, targetId);
+    if (!resolved) return res.status(404).json({ error: 'user_not_found' });
+
+    const existing = resolved.snapshot.data() || {};
+    const unlocked = sanitizeUnlocked(existing.badgesUnlocked || []);
+    if (requestedTier && (unlocked.length === 0 || !unlocked.includes(requestedTier))) {
+      return res.status(400).json({ error: 'badge_not_unlocked' });
+    }
+
+    const previousEquipped = normalizeBadgeSelection(existing.equippedBadge);
+    const previousShow = existing.showBadgeOnProfile === undefined ? true : !!existing.showBadgeOnProfile;
+    let mutated = false;
+    const update = {};
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    if (tierProvided) {
+      if (requestedTier) {
+        if (requestedTier !== previousEquipped) {
+          update.equippedBadge = requestedTier;
+          mutated = true;
+        }
+      } else if (previousEquipped) {
+        update.equippedBadge = admin.firestore.FieldValue.delete();
+        mutated = true;
+      }
+    }
+
+    if (visibilityProvided) {
+      if (showOnProfile !== previousShow) {
+        update.showBadgeOnProfile = showOnProfile;
+        mutated = true;
+      }
+    }
+
+    if (mutated) {
+      update.updatedAt = now;
+      update.badgeUpdatedAt = now;
+      await resolved.ref.set(update, { merge: true });
+    } else if (tierProvided || visibilityProvided) {
+      await resolved.ref.set({ updatedAt: now }, { merge: true });
+    }
+
+    const fresh = await resolved.ref.get();
+    const payload = fresh.data() || {};
+    const sanitized = sanitizeUnlocked(payload.badgesUnlocked || []);
+    const equipped = normalizeBadgeSelection(payload.equippedBadge);
+    const showFlag = payload.showBadgeOnProfile === undefined ? true : !!payload.showBadgeOnProfile;
+    const highestRaw = payload.highestBadgeTier || payload.badgeTier || null;
+    const highest = normalizeBadgeSelection(highestRaw);
+    const response = {
+      id: fresh.id,
+      equippedBadge: equipped && isValidBadgeTier(equipped) ? equipped : null,
+      badgesUnlocked: sanitized,
+      highestBadgeTier: highest,
+      showBadgeOnProfile: showFlag,
+      badgeUpdatedAt: payload.badgeUpdatedAt && payload.badgeUpdatedAt.toDate
+        ? payload.badgeUpdatedAt.toDate().toISOString()
+        : null,
+    };
+
+    const tierChanged = tierProvided && ((requestedTier && requestedTier !== previousEquipped) || (!requestedTier && !!previousEquipped));
+    const visibilityChanged = visibilityProvided && (showOnProfile !== previousShow);
+    const shouldRecordHistory = (tierChanged || visibilityChanged) && (matchesUserIdentity(req.user, fresh.id) || isAdminUser(req.user));
+    if (shouldRecordHistory) {
+      const historyRef = db.collection('points_history').doc(`badgeEquip_${fresh.id}_${Date.now()}`);
+      const action = tierChanged
+        ? (response.equippedBadge ? 'equip' : 'unequip')
+        : (response.showBadgeOnProfile ? 'show' : 'hide');
+      await historyRef.set({
+        sellerId: fresh.id,
+        buyerId: null,
+        sellerPoints: 0,
+        buyerPoints: 0,
+        totalPoints: 0,
+        productId: null,
+        productTitle: null,
+        eventType: 'badge_equip',
+        badgeTier: response.equippedBadge || highest || null,
+        badgeLabel: badgeLabelFromTier(response.equippedBadge || highest || null) || null,
+        badgeAction: action,
+        showBadgeOnProfile: response.showBadgeOnProfile,
+        equippedBadge: response.equippedBadge || null,
+        isBadgeEquipEvent: true,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    res.json(response);
+  } catch (err) {
+    console.error('setEquippedBadge error:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.getBadgeFeed = async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+
+    const targetId = String(req.params.id || '').trim();
+    if (!targetId) return res.status(400).json({ error: 'user_id_required' });
+
+    const allowAdmin = isAdminUser(req.user);
+    const isSelf = matchesUserIdentity(req.user, targetId);
+    if (!allowAdmin && !isSelf) return res.status(403).json({ error: 'forbidden' });
+
+    const limitParam = Math.min(25, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const fetchLimit = limitParam * 3;
+    const historyCol = db.collection('points_history');
+
+    async function fetchHistory(roleField) {
+      try {
+        return await historyCol.where(roleField, '==', targetId).orderBy('createdAt', 'desc').limit(fetchLimit).get();
+      } catch (err) {
+        const msg = (err && (err.message || err.code)) || '';
+        if (/FAILED_PRECONDITION|requires an index/i.test(msg)) {
+          return await historyCol.where(roleField, '==', targetId).limit(fetchLimit).get();
+        }
+        throw err;
+      }
+    }
+
+    const [sellerSnap, buyerSnap] = await Promise.all([
+      fetchHistory('sellerId'),
+      fetchHistory('buyerId'),
+    ]);
+
+    const entries = [];
+
+    const toMillis = (value) => {
+      if (!value) return Date.now();
+      if (typeof value.toDate === 'function') {
+        const date = value.toDate();
+        return Number.isNaN(date?.getTime()) ? Date.now() : date.getTime();
+      }
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+      const parsed = Date.parse(value);
+      return Number.isNaN(parsed) ? Date.now() : parsed;
+    };
+
+    const buildUnlockEntries = (docId, data, role, createdAtMs) => {
+      const rawList = role === 'seller' ? data.sellerBadgeUnlocks : data.buyerBadgeUnlocks;
+      const unlockedList = Array.isArray(rawList) ? sanitizeUnlocked(rawList) : [];
+      if (!unlockedList.length) return;
+      const productTitle = data.productTitle || null;
+      const totalPoints = data.totalPoints || null;
+      unlockedList.forEach((tier, idx) => {
+        const label = badgeLabelFromTier(tier) || (tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : 'Badge');
+        const createdAtIso = new Date(createdAtMs).toISOString();
+        entries.push({
+          id: `${docId}:${role}:unlock:${tier || idx}`,
+          tier,
+          label,
+          role,
+          type: 'unlock',
+          action: 'unlock',
+          createdAt: createdAtIso,
+          timestamp: createdAtMs,
+          totalPoints,
+          productTitle,
+          title: `${label} badge unlocked`,
+          message: productTitle
+            ? `You unlocked the ${label} badge after completing "${productTitle}" as a ${role}.`
+            : `You unlocked the ${label} badge as a ${role}.`,
+        });
+      });
+    };
+
+    const buildVisibilityEntry = (docId, data, createdAtMs) => {
+      if (!(data && (data.isBadgeEquipEvent || data.eventType === 'badge_equip'))) return;
+      const createdAtIso = new Date(createdAtMs).toISOString();
+      const tier = normalizeBadgeSelection(data.equippedBadge || data.badgeTier || null);
+      const label = badgeLabelFromTier(tier) || (tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : null);
+      const action = data.badgeAction || (data.showBadgeOnProfile === false ? 'hide' : tier ? 'equip' : 'unequip');
+      let title = 'Badge updated';
+      let message = '';
+      switch (action) {
+        case 'hide':
+          title = 'Badge hidden';
+          message = label ? `${label} is now hidden on your profile.` : 'Your badge is now hidden on your profile.';
+          break;
+        case 'show':
+          title = 'Badge visible';
+          message = label ? `${label} is now visible on your profile.` : 'Your badge is now visible on your profile.';
+          break;
+        case 'unequip':
+          title = 'Profile badge cleared';
+          message = 'Automatic badge selection has been restored on your profile.';
+          break;
+        default:
+          title = label ? `${label} equipped` : 'Badge equipped';
+          message = label ? `You are now showcasing the ${label} badge.` : 'You are now showcasing a badge on your profile.';
+      }
+
+      entries.push({
+        id: `${docId}:seller:visibility:${createdAtMs}`,
+        tier,
+        label,
+        role: 'seller',
+        type: 'visibility',
+        action,
+        createdAt: createdAtIso,
+        timestamp: createdAtMs,
+        title,
+        message,
+      });
+    };
+
+    sellerSnap.forEach((doc) => {
+      const data = doc.data() || {};
+      const createdAtMs = toMillis(data.createdAt);
+      buildUnlockEntries(doc.id, data, 'seller', createdAtMs);
+      buildVisibilityEntry(doc.id, data, createdAtMs);
+    });
+
+    buyerSnap.forEach((doc) => {
+      const data = doc.data() || {};
+      const createdAtMs = toMillis(data.createdAt);
+      buildUnlockEntries(doc.id, data, 'buyer', createdAtMs);
+    });
+
+    entries.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    res.json({ items: entries.slice(0, limitParam) });
+  } catch (err) {
+    console.error('getBadgeFeed error:', err);
     res.status(500).json({ error: err.message });
   }
 };

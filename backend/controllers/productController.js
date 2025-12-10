@@ -2,6 +2,7 @@
 const { admin, db } = require('../config/firebaseAdmin');
 const nodemailer = require('nodemailer');
 const cloudinary = require('../config/cloudinary');
+const { evaluateBadgeProgress, badgeLabelFromTier } = require('../config/badges');
 
 // Create a nodemailer transporter if SMTP env vars are present
 let transporter = null;
@@ -72,6 +73,34 @@ function parsePrice(value) {
   // For other types try coercion
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function currentTotalPoints(profile) {
+  if (!profile || typeof profile !== 'object') return 0;
+  if (profile.totalPoints !== undefined) {
+    const total = Number(profile.totalPoints);
+    if (Number.isFinite(total)) return total;
+  }
+  const sellerPoints = Number(profile.sellerPoints || 0);
+  const buyerPoints = Number(profile.buyerPoints || 0);
+  const miscPoints = Number(profile.points || 0);
+  const total = sellerPoints + buyerPoints + miscPoints;
+  return Number.isFinite(total) ? total : 0;
+}
+
+function buildBadgeNotifications(summary, role) {
+  if (!summary || !Array.isArray(summary.newlyUnlocked) || summary.newlyUnlocked.length === 0) return [];
+  const totalPoints = summary.totalPoints || null;
+  return summary.newlyUnlocked.map((tier, index) => {
+    const label = badgeLabelFromTier(tier) || (tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : `Badge ${index + 1}`);
+    return {
+      tier,
+      label,
+      role,
+      totalPoints,
+      type: 'unlock',
+    };
+  });
 }
 
 // Normalize status strings to a canonical value
@@ -149,7 +178,7 @@ function loadPointsMatrix() {
   return {
     'Electronics': { seller: 10, buyer: 5 },
     'Home and Living': { seller: 8, buyer: 4 },
-    'Furniture': { seller: 12, buyer: 6 },
+    'Furniture': { seller: 6, buyer: 6 },
     'Sports': { seller: 6, buyer: 3 },
     'Fashion': { seller: 6, buyer: 3 },
     'Others': { seller: 3, buyer: 3 },
@@ -672,6 +701,10 @@ exports.markSold = async (req, res) => {
     } catch (e) { productImageUrl = ''; }
 
     let alreadyAwarded = false;
+    let sellerBadgeSummary = null;
+    let buyerBadgeSummary = null;
+    let sellerBadgeNotifications = [];
+    let buyerBadgeNotifications = [];
 
     await db.runTransaction(async (tx) => {
       const freshProduct = await tx.get(productRef);
@@ -685,7 +718,16 @@ exports.markSold = async (req, res) => {
       const histSnap = await tx.get(historyRef);
       if (histSnap.exists) { alreadyAwarded = true; }
 
-      // Update product to sold (if not already)
+      let sellerData = {};
+      let buyerData = {};
+      if (!alreadyAwarded) {
+        const sellerDoc = await tx.get(sellerRef);
+        const buyerDoc = await tx.get(buyerRef);
+        sellerData = sellerDoc.exists ? (sellerDoc.data() || {}) : {};
+        buyerData = buyerDoc.exists ? (buyerDoc.data() || {}) : {};
+      }
+
+      // All reads complete; proceed with writes
       const productUpdate = {
         status: 'sold',
         soldAt: now,
@@ -697,20 +739,49 @@ exports.markSold = async (req, res) => {
       tx.set(productRef, productUpdate, { merge: true });
 
       if (!alreadyAwarded) {
-        // Increment points for seller and buyer
-        tx.set(sellerRef, {
+        const sellerTotalBefore = currentTotalPoints(sellerData);
+        const buyerTotalBefore = currentTotalPoints(buyerData);
+        const sellerTotalAfter = sellerTotalBefore + (Number(sellerPoints) || 0);
+        const buyerTotalAfter = buyerTotalBefore + (Number(buyerPoints) || 0);
+
+        const sellerBadge = evaluateBadgeProgress(sellerTotalAfter, sellerData.badgesUnlocked || [], sellerData.highestBadgeTier || sellerData.badgeTier);
+        const buyerBadge = evaluateBadgeProgress(buyerTotalAfter, buyerData.badgesUnlocked || [], buyerData.highestBadgeTier || buyerData.badgeTier);
+
+        const sellerUpdate = {
           sellerPoints: admin.firestore.FieldValue.increment(sellerPoints),
           totalPoints: admin.firestore.FieldValue.increment(sellerPoints),
           updatedAt: now,
-        }, { merge: true });
-        tx.set(buyerRef, {
+        };
+        if (sellerBadge.changed) {
+          sellerUpdate.badgesUnlocked = sellerBadge.unlocked;
+          sellerUpdate.highestBadgeTier = sellerBadge.highestTier;
+          sellerUpdate.badgeTier = sellerBadge.highestTier;
+          sellerUpdate.badgeUpdatedAt = now;
+          if (!sellerData.equippedBadge && sellerBadge.highestTier) {
+            sellerUpdate.equippedBadge = sellerBadge.highestTier;
+          }
+        }
+
+        const buyerUpdate = {
           buyerPoints: admin.firestore.FieldValue.increment(buyerPoints),
           totalPoints: admin.firestore.FieldValue.increment(buyerPoints),
           updatedAt: now,
-        }, { merge: true });
+        };
+        if (buyerBadge.changed) {
+          buyerUpdate.badgesUnlocked = buyerBadge.unlocked;
+          buyerUpdate.highestBadgeTier = buyerBadge.highestTier;
+          buyerUpdate.badgeTier = buyerBadge.highestTier;
+          buyerUpdate.badgeUpdatedAt = now;
+          if (!buyerData.equippedBadge && buyerBadge.highestTier) {
+            buyerUpdate.equippedBadge = buyerBadge.highestTier;
+          }
+        }
+
+        tx.set(sellerRef, sellerUpdate, { merge: true });
+        tx.set(buyerRef, buyerUpdate, { merge: true });
 
         // Record history
-        tx.set(historyRef, {
+        const historyPayload = {
           productId,
           productTitle,
           productImageUrl,
@@ -721,7 +792,24 @@ exports.markSold = async (req, res) => {
           buyerPoints,
           totalPoints: (sellerPoints + buyerPoints),
           createdAt: now,
-        }, { merge: true });
+        };
+
+        if (sellerBadge && Array.isArray(sellerBadge.newlyUnlocked) && sellerBadge.newlyUnlocked.length > 0) {
+          historyPayload.sellerBadgeUnlocks = sellerBadge.newlyUnlocked;
+          historyPayload.sellerBadgeHighestTier = sellerBadge.highestTier || sellerBadge.previousHighest || null;
+        }
+
+        if (buyerBadge && Array.isArray(buyerBadge.newlyUnlocked) && buyerBadge.newlyUnlocked.length > 0) {
+          historyPayload.buyerBadgeUnlocks = buyerBadge.newlyUnlocked;
+          historyPayload.buyerBadgeHighestTier = buyerBadge.highestTier || buyerBadge.previousHighest || null;
+        }
+
+        tx.set(historyRef, historyPayload, { merge: true });
+
+        sellerBadgeSummary = { ...sellerBadge, totalPoints: sellerTotalAfter };
+        buyerBadgeSummary = { ...buyerBadge, totalPoints: buyerTotalAfter };
+        sellerBadgeNotifications = buildBadgeNotifications(sellerBadgeSummary, 'seller');
+        buyerBadgeNotifications = buildBadgeNotifications(buyerBadgeSummary, 'buyer');
       }
     });
 
@@ -738,6 +826,14 @@ exports.markSold = async (req, res) => {
       sellerPoints,
       buyerPoints,
       alreadyAwarded,
+      badgeUpdates: {
+        seller: sellerBadgeSummary,
+        buyer: buyerBadgeSummary,
+      },
+      badgeNotifications: {
+        seller: sellerBadgeNotifications,
+        buyer: buyerBadgeNotifications,
+      },
     });
   } catch (err) {
     console.error('markSold error:', err);

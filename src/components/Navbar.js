@@ -8,6 +8,15 @@ import useUnreadMessages from './useUnreadMessages';
 import NotificationsPopover from './NotificationsPopover';
 import authFetch from '../utils/authFetch';
 
+function getStoredUser() {
+  try {
+    return JSON.parse(localStorage.getItem('user') || 'null');
+  } catch (err) {
+    console.warn('Unable to parse stored user', err);
+    return null;
+  }
+}
+
 export default function Navbar(){
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('')
@@ -16,7 +25,8 @@ export default function Navbar(){
   const [modalType, setModalType] = useState('login')
   const [menuOpen, setMenuOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const user = JSON.parse(localStorage.getItem('user') || 'null')
+  const [userData, setUserData] = useState(getStoredUser);
+  const user = userData;
   const ref = useRef()
   const notifRef = useRef()
   const { totalUnread } = useUnreadMessages();
@@ -84,9 +94,28 @@ export default function Navbar(){
     return ()=>document.removeEventListener('click', onDoc)
   },[])
 
+  useEffect(() => {
+    function handleStorage(e) {
+      if (!e || e.key === 'user' || e.type === 'agapay-user-update') {
+        setUserData(getStoredUser());
+      }
+    }
+    function handleCustomUpdate() {
+      setUserData(getStoredUser());
+    }
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('agapay:user-update', handleCustomUpdate);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('agapay:user-update', handleCustomUpdate);
+    };
+  }, []);
+
   function handleLogout(){
     localStorage.removeItem('token')
     localStorage.removeItem('user')
+    window.dispatchEvent(new Event('agapay:user-update'));
+    setUserData(null)
     navigate('/')
     window.location.reload()
   }
@@ -339,6 +368,7 @@ export default function Navbar(){
   {(!user || user.role !== 'admin') && <QuickMessagesButton />}
   <AuthModal open={modalOpen} type={modalType} onClose={(user)=>{
       setModalOpen(false);
+      setUserData(getStoredUser());
       // If user is admin, redirect to /admin
       if(user && user.role === 'admin') {
         localStorage.setItem('admin', 'true');

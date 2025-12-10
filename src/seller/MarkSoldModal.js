@@ -78,6 +78,8 @@ export default function MarkSoldModal({ open, onClose, product, onMarked }) {
           sellerPoints: Number(json.sellerPoints) || 0,
           buyerPoints: Number(json.buyerPoints) || 0,
           alreadyAwarded: !!json.alreadyAwarded,
+          badgeUpdates: json.badgeUpdates || null,
+          badgeNotifications: json.badgeNotifications || null,
         });
       }
       onClose && onClose();
