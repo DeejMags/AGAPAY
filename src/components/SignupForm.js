@@ -38,7 +38,6 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
   const [phone,setPhone] = useState('')
   const [password,setPassword] = useState('')
   const [confirm,setConfirm] = useState('')
-  const [role,setRole] = useState('user')
   const [error,setError] = useState('')
   const [fieldErrors, setFieldErrors] = useState({});
   const [verificationSent, setVerificationSent] = useState(false);
@@ -67,6 +66,9 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
     setError('');
     if (!validateAll()) return;
     try {
+      const normalizedEmail = email.trim().toLowerCase();
+      const isAdminEmail = normalizedEmail === 'admin@agapay.com' || normalizedEmail === 'admin@gmail.com';
+      const resolvedRole = isAdminEmail ? 'admin' : 'user';
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -74,9 +76,9 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           name: `${firstName} ${lastName}`.trim(),
-          email,
+          email: email.trim(),
           phone,
-          role,
+          role: resolvedRole,
           password,
         })
       });
@@ -91,16 +93,16 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
       const cred = await signInWithEmailAndPassword(auth, email, password);
       const fullName = `${firstName} ${lastName}`.trim();
       await updateProfile(cred.user, { displayName: fullName });
-      const isAdmin = email === 'admin@agapay.com' || email === 'admin@gmail.com';
+      const isAdmin = isAdminEmail;
       const profile = {
         id: json.id || cred.user.uid,
         username: fullName,
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        email,
+        email: email.trim(),
         phone,
         profilePic: cred.user.photoURL || '',
-        role: isAdmin ? 'admin' : role,
+        role: resolvedRole,
       };
       localStorage.setItem('user', JSON.stringify(profile));
       localStorage.setItem('token', cred.user.uid);
@@ -185,13 +187,6 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
   {fieldErrors.password && <div className="text-red-500 text-sm">{fieldErrors.password}</div>}
   <input value={confirm} onChange={e=>{ setConfirm(e.target.value); onFieldDirty && onFieldDirty(); }} type="password" placeholder="Confirm password" className="p-2 border rounded" />
   {fieldErrors.confirm && <div className="text-red-500 text-sm">{fieldErrors.confirm}</div>}
-      <div className="flex gap-4 items-center">
-        <label className="font-medium">Role:</label>
-  <select value={role} onChange={e=>{ setRole(e.target.value); onFieldDirty && onFieldDirty(); }} className="border rounded p-2">
-          <option value="user">User</option>
-          <option value="admin">Admin</option>
-        </select>
-      </div>
       <button className="p-2 bg-teal-600 text-white rounded">Create account</button>
       <button type="button" className="p-2 bg-red-500 text-white rounded mt-2" onClick={handleGoogleSignup}>
         Sign Up with Google

@@ -27,10 +27,10 @@ function displayName(u) {
 
 export default function NotificationsPopover({ open, onClose, adminCounts = null }) {
   const navigate = useNavigate();
-  const [tab, setTab] = useState('all'); 
-  const [items, setItems] = useState([]); 
+  const [tab, setTab] = useState('all'); // 'all' | 'unread'
+  const [items, setItems] = useState([]); // { id, otherId, otherName, otherAvatar, text, ts, unread }
   const [profileCache, setProfileCache] = useState({});
-  const [systemNotifs, setSystemNotifs] = useState([]); 
+  const [systemNotifs, setSystemNotifs] = useState([]); // admin system notifications
   const [adminSummary, setAdminSummary] = useState({ pendingProducts: 0, openReports: 0 });
   const [loadingAdmin, setLoadingAdmin] = useState(false);
   const [badgeFeed, setBadgeFeed] = useState([]);
@@ -49,6 +49,7 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
     return Number.isNaN(parsed) ? Date.now() : parsed;
   }
 
+  // Subscribe to conversations and map to notification items
   useEffect(() => {
     if (!open || !meId) return;
     let unsub = null;

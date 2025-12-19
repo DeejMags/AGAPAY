@@ -148,7 +148,7 @@ exports.updateUser = async (req, res) => {
 
     // Always update timestamps on profile saves
     const now = admin.firestore.FieldValue.serverTimestamp();
-    if (!payload.updatedAt) payload.updatedAt = stamp;
+    if (!payload.updatedAt) payload.updatedAt = now;
 
     const usersCol = db.collection('users');
     let targetRef = usersCol.doc(incomingId);
@@ -217,7 +217,7 @@ exports.updateUser = async (req, res) => {
     if (!snapshot || !snapshot.exists) {
       const baseCreate = {
         authId: payload.authId || incomingId || null,
-        createdAt: stamp,
+        createdAt: now,
       };
       await targetRef.set({ ...baseCreate, ...payload }, { merge: true });
       const created = await targetRef.get();

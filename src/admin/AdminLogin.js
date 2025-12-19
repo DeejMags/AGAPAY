@@ -1,25 +1,40 @@
 import React, { useState } from 'react';
 
+const DEFAULT_ADMIN_LIST = (process.env.REACT_APP_ADMIN_EMAILS || 'admin@agapay.com,admin@gmail.com')
+  .split(',')
+  .map(email => email.trim().toLowerCase())
+  .filter(Boolean);
+
+const FALLBACK_PASSWORDS = {
+  'admin@gmail.com': 'Admin1234',
+};
+
+const SHARED_ADMIN_PASSWORD = process.env.REACT_APP_ADMIN_PASSWORD || 'Admin1234';
+
+const ALLOWED_ADMIN_EMAILS = DEFAULT_ADMIN_LIST.length ? DEFAULT_ADMIN_LIST : ['admin@agapay.com'];
+
+function resolveAdminPassword(email) {
+  return FALLBACK_PASSWORDS[email] || SHARED_ADMIN_PASSWORD;
+}
+
 export default function AdminLogin({ onLogin }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  // Demo admin and user accounts
-  const demoAccounts = [
-    { email: 'admin@agapay.com', password: 'admin123' },
-    { email: 'juan@email.com', password: 'juanpass' },
-    { email: 'maria@email.com', password: 'mariapass' },
-  ];
-
   function handleSubmit(e) {
     e.preventDefault();
-    const found = demoAccounts.find(acc => acc.email === email && acc.password === password);
-    if (found) {
-      onLogin();
-    } else {
-      setError('Invalid credentials');
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!ALLOWED_ADMIN_EMAILS.includes(normalizedEmail)) {
+      setError('You do not have access to the admin console.');
+      return;
     }
+    const expectedPassword = resolveAdminPassword(normalizedEmail);
+    if (!expectedPassword || password !== expectedPassword) {
+      setError('Invalid credentials');
+      return;
+    }
+    onLogin({ email: normalizedEmail });
   }
 
   return (
@@ -43,14 +58,9 @@ export default function AdminLogin({ onLogin }) {
         {error && <div className="text-red-500 text-sm text-center">{error}</div>}
         <button type="submit" className="bg-teal-600 text-white font-bold py-2 rounded-lg hover:bg-teal-700 transition">Login</button>
         <div className="text-xs text-gray-500 mt-2 text-center">
-          Demo accounts:<br/>
-          admin@agapay.com / admin123<br/>
-          juan@email.com / juanpass<br/>
-          maria@email.com / mariapass
+          Admin access is restricted. Configure allowed addresses via <code>REACT_APP_ADMIN_EMAILS</code> and the password via <code>REACT_APP_ADMIN_PASSWORD</code>.
         </div>
       </form>
     </div>
   );
 }
-
-// ...existing code...
