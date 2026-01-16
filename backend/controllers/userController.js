@@ -488,6 +488,61 @@ exports.getBadgeFeed = async (req, res) => {
   }
 };
 
+// Return merged raw points_history documents for a given user (seller or buyer)
+exports.getPointsHistory = async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+
+    const targetId = String(req.params.id || '').trim();
+    if (!targetId) return res.status(400).json({ error: 'user_id_required' });
+
+    const allowAdmin = isAdminUser(req.user);
+    const isSelf = matchesUserIdentity(req.user, targetId);
+    if (!allowAdmin && !isSelf) return res.status(403).json({ error: 'forbidden' });
+
+    const limitParam = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    const historyCol = db.collection('points_history');
+
+    async function fetchHistory(roleField) {
+      try {
+        return await historyCol.where(roleField, '==', targetId).orderBy('createdAt', 'desc').limit(limitParam).get();
+      } catch (err) {
+        const msg = (err && (err.message || err.code)) || '';
+        if (/FAILED_PRECONDITION|requires an index/i.test(msg)) {
+          return await historyCol.where(roleField, '==', targetId).limit(limitParam).get();
+        }
+        throw err;
+      }
+    }
+
+    const [sellerSnap, buyerSnap] = await Promise.all([
+      fetchHistory('sellerId'),
+      fetchHistory('buyerId'),
+    ]);
+
+    const toIso = (value) => {
+      if (!value) return null;
+      if (typeof value.toDate === 'function') return value.toDate().toISOString();
+      if (typeof value === 'number') return new Date(value).toISOString();
+      const parsed = Date.parse(value);
+      return Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
+    };
+
+    const docs = [...sellerSnap.docs, ...buyerSnap.docs]
+      .map(d => {
+        const data = d.data() || {};
+        return { id: d.id, ...data, createdAt: toIso(data.createdAt) };
+      })
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+      .slice(0, limitParam);
+
+    res.json({ items: docs });
+  } catch (err) {
+    console.error('getPointsHistory error:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // Admin helper: list users missing authId so we can migrate or inspect them before destructive ops
 exports.getUsersMissingAuthId = async (req, res) => {
   try {

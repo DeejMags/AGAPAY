@@ -1,7 +1,3 @@
-// backend/config/firebaseAdmin.js
-// This file initializes Firebase Admin unless DISABLE_FIREBASE=true is set.
-// When DISABLE_FIREBASE=true we export nulls so the rest of the app can detect
-// Firebase is intentionally disabled and avoid using it.
 if (process.env.DISABLE_FIREBASE === 'true') {
   console.log('Firebase Admin is disabled via DISABLE_FIREBASE=true');
   module.exports = { admin: null, db: null };

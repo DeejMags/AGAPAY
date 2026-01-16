@@ -10,6 +10,7 @@ router.get('/:id/badges/feed', auth, firebaseCtrl.getBadgeFeed)
 router.get('/:id', firebaseCtrl.getUserById)
 router.post('/', firebaseCtrl.createUser)
 router.post('/:id/badges/equip', auth, firebaseCtrl.setEquippedBadge)
+router.post('/:id/points_history', auth, firebaseCtrl.getPointsHistory)
 router.put('/:id', firebaseCtrl.updateUser)
 router.delete('/:id', firebaseCtrl.deleteUser)
 // Admin: ban a user by id/email/uid

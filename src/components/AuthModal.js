@@ -97,7 +97,7 @@ export default function AuthModal({ open, type='login', onClose }){
         }}>
           ✕
         </button>
-        <h2 className="text-xl font-semibold mb-4">{type==='login' ? 'Login' : 'Sign up'}</h2>
+        <h2 className="text-xl font-semibold mb-4 text-center">{type==='login' ? 'Login' : 'Sign up'}</h2>
         {/* Disable form contents if aborted */}
         <div className={aborted ? 'pointer-events-none opacity-50 select-none' : ''}>
           {signupEl}

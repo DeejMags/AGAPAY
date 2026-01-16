@@ -21,12 +21,19 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
   // Helper to consistently compute a user's display name
   const getDisplayName = (u) => {
     if (!u) return '';
+    // Prefer real human-readable fields in order: full name, username/displayName, email local-part, phone
     const combined = [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
-    let name = combined || u.username || u.name || u.displayName || u.fullName || (u.email ? String(u.email).split('@')[0] : '');
-    if (!name || !name.trim()) {
-      name = (u.email ? String(u.email).split('@')[0] : '') || String(u.id || '').slice(0, 12);
+    const preferred = combined || u.fullName || u.name || u.displayName || u.username || null;
+    if (preferred && String(preferred).trim()) return String(preferred).trim();
+    // Fallback to email local-part if present
+    if (u.email) {
+      const local = String(u.email).split('@')[0];
+      if (local && local.trim()) return local.trim();
     }
-    return name;
+    // Next prefer phone if available
+    if (u.phone) return String(u.phone).trim();
+    // Last resort: short id fragment
+    return String(u.id || '').slice(0, 12);
   };
 
   useEffect(() => {

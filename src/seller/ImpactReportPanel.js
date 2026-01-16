@@ -27,6 +27,8 @@ function toDate(value) {
   }
 }
 
+// (formatDate is defined later near the end of the file to avoid hoisting issues)
+
 export default function ImpactReportPanel() {
   const [loading, setLoading] = useState(true);
   const [sold, setSold] = useState(0);
@@ -36,6 +38,8 @@ export default function ImpactReportPanel() {
   const userUnsubRef = useRef(null);
   const historyUnsubRef = useRef(null);
   const buyerHistoryUnsubRef = useRef(null);
+  const historyPollRef = useRef(null);
+  const buyerHistoryPollRef = useRef(null);
   const [history, setHistory] = useState([]); // list of transactions for this seller
   const [historyLoading, setHistoryLoading] = useState(true); // loading indicator for transactions
   const [nameCache, setNameCache] = useState({}); // userId -> name 
@@ -310,6 +314,17 @@ export default function ImpactReportPanel() {
         const base = collection(db, 'points_history');
         const qOrdered = query(base, where(roleField, '==', uid), orderBy('createdAt', 'desc'), limit(50));
         let firstAttempt = true;
+        // Perform an initial fetch so we have data even if realtime Listen is blocked
+        try {
+          const { getDocs } = await import('firebase/firestore');
+          const snapInit = await getDocs(qOrdered);
+          const rowsInit = snapInit.docs.map(d => ({ id: d.id, ...d.data() }));
+          updateMergedHistory(roleField, rowsInit);
+          markSourceLoaded(storeRef);
+        } catch (e) {
+          // ignore initial fetch errors; we'll still attempt to attach realtime listener
+        }
+
         const unsub = onSnapshot(qOrdered, (snap) => {
           const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           updateMergedHistory(roleField, rows);
@@ -332,9 +347,38 @@ export default function ImpactReportPanel() {
               // Stop original listener
               try { unsub(); } catch {}
             } catch {}
-          } else {
-            console.debug('ImpactReport history realtime error', msg);
-          }
+          } else if (firstAttempt && /blocked|ERR_BLOCKED_BY_CLIENT|net::ERR_BLOCKED_BY_CLIENT|Failed to fetch/i.test(msg)) {
+            // Browser/network blocked the real-time Listen channel (adblockers or network filters).
+            // Fall back to a polling strategy using getDocs to fetch recent history periodically.
+            firstAttempt = false;
+            (async () => {
+              try {
+                const { getDocs } = await import('firebase/firestore');
+                const qSimple = query(base, where(roleField, '==', uid), limit(50));
+                const snap2 = await getDocs(qSimple);
+                const rows2 = snap2.docs.map(d => ({ id: d.id, ...d.data() }));
+                updateMergedHistory(roleField, rows2);
+                markSourceLoaded(storeRef);
+                // set up polling every 30s
+                const pollInterval = setInterval(async () => {
+                  try {
+                    const s = await getDocs(qSimple);
+                    const r = s.docs.map(d => ({ id: d.id, ...d.data() }));
+                    updateMergedHistory(roleField, r);
+                  } catch (e) { /* ignore individual poll errors */ }
+                }, 30000);
+                if (storeRef === 'seller') historyPollRef.current = pollInterval; else buyerHistoryPollRef.current = pollInterval;
+                // Stop original listener
+                try { unsub(); } catch {}
+              } catch (e) {
+                console.debug('ImpactReport history polling fallback failed', e && e.message);
+              }
+            })();
+            } else {
+              // Unknown realtime error: log and mark source loaded so UI won't stay stuck in loading state.
+              console.debug('ImpactReport history realtime error', msg);
+              try { markSourceLoaded(storeRef); } catch (_) {}
+            }
         });
         if (storeRef === 'seller') historyUnsubRef.current = unsub; else buyerHistoryUnsubRef.current = unsub;
       }
@@ -360,11 +404,44 @@ export default function ImpactReportPanel() {
           return db - da;
         });
         setHistory(list);
+        // If merged history updated, ensure loading state is cleared so UI renders.
+        try { setHistoryLoading(false); } catch (_) {}
       }
 
       await attachWithFallback('sellerId', 'seller');
       await attachWithFallback('buyerId', 'buyer');
     } catch (e) { /* ignore */ }
+  }, [resolveUserName, resolveProductTitle]);
+
+  // Fetch transaction history from backend REST endpoint (reliable when Firestore Listen is blocked)
+  const loadHistoryFromApi = useCallback(async () => {
+    try {
+      setHistoryLoading(true);
+      const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
+      if (!uid) { setHistory([]); setHistoryLoading(false); return; }
+      const res = await authFetch(`/api/users/${encodeURIComponent(uid)}/points_history`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res || !res.ok) {
+        // On failure, don't overwrite if we already have history; just stop loading
+        try { setHistoryLoading(false); } catch (_) {}
+        return;
+      }
+      const data = await res.json();
+      const items = Array.isArray(data.items) ? data.items : (data.items || []);
+      // Enrich caches for display
+      items.forEach(r => {
+        if (r.buyerId && !nameCacheRef.current[r.buyerId]) resolveUserName(r.buyerId).catch(()=>{});
+        if (r.sellerId && !nameCacheRef.current[r.sellerId]) resolveUserName(r.sellerId).catch(()=>{});
+        if (r.productId && !productCacheRef.current[r.productId]) resolveProductTitle(r.productId).catch(()=>{});
+      });
+      setHistory(items);
+      try { setHistoryLoading(false); } catch (_) {}
+    } catch (e) {
+      console.debug('ImpactReport history API load failed', e && e.message);
+      try { setHistoryLoading(false); } catch (_) {}
+    }
   }, [resolveUserName, resolveProductTitle]);
 
   useEffect(() => {
@@ -406,7 +483,10 @@ export default function ImpactReportPanel() {
           // Also attach a realtime listener to Firestore for live updates
           attachRealtimeListener();
           attachUserPointsListener();
-          attachHistoryListener();
+          // Prefer REST-based history load to avoid Listen being blocked by client extensions
+          loadHistoryFromApi();
+          try { if (historyPollRef.current) clearInterval(historyPollRef.current); } catch(_){}
+          historyPollRef.current = setInterval(loadHistoryFromApi, 30000);
           return;
         }
       } catch (e) {
@@ -436,10 +516,12 @@ export default function ImpactReportPanel() {
             }
           }
         } catch (e) { /* ignore */ }
-        // Attach realtime listener
+        // Attach realtime listener and load history via REST (polling will keep it fresh)
         attachRealtimeListener();
         attachUserPointsListener();
-        attachHistoryListener();
+        loadHistoryFromApi();
+        try { if (historyPollRef.current) clearInterval(historyPollRef.current); } catch(_){}
+        historyPollRef.current = setInterval(loadHistoryFromApi, 30000);
       } catch (e) {
         if (!cancelled) { setSold(0); }
       } finally {
@@ -453,6 +535,8 @@ export default function ImpactReportPanel() {
       if (userUnsubRef.current) { try { userUnsubRef.current(); } catch(e) {} }
       if (historyUnsubRef.current) { try { historyUnsubRef.current(); } catch(e) {} }
       if (buyerHistoryUnsubRef.current) { try { buyerHistoryUnsubRef.current(); } catch(e) {} }
+      if (historyPollRef.current) { try { clearInterval(historyPollRef.current); } catch (e) {} }
+      if (buyerHistoryPollRef.current) { try { clearInterval(buyerHistoryPollRef.current); } catch (e) {} }
     };
   }, [attachRealtimeListener, attachUserPointsListener, attachHistoryListener, applyBadgeFromProfile]);
 
@@ -478,6 +562,15 @@ export default function ImpactReportPanel() {
     const activeEquippedTier = profileVisible ? (badgeState.equippedBadge || null) : null;
     const equipSavingKey = equipStatus.state === 'saving' ? equipStatus.tier : null;
     const currentUid = (auth && auth.currentUser && auth.currentUser.uid) || '';
+
+    // Exclude badge visibility/equip events from Recent Transactions
+    const filteredHistory = Array.isArray(history)
+      ? history.filter(h => {
+          if (!h) return false;
+          const isBadgeEquipEvent = !!h?.isBadgeEquipEvent || h?.eventType === 'badge_equip';
+          return !isBadgeEquipEvent;
+        })
+      : [];
 
   
 
@@ -615,9 +708,9 @@ export default function ImpactReportPanel() {
       {/* Transactions */}
       <div className="mt-6">
         <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3">
             <h4 className="text-lg font-semibold text-gray-800">Recent Transactions</h4>
-            <span className="text-xs text-gray-500">{historyLoading ? 'Loading transactions…' : `Showing latest ${Math.min(history.length, 50)} records`}</span>
+            <span className="text-xs text-gray-500">{historyLoading ? 'Loading transactions…' : `Showing latest ${Math.min(filteredHistory.length, 50)} records`}</span>
           </div>
         </div>
         {historyLoading ? (
@@ -645,7 +738,7 @@ export default function ImpactReportPanel() {
               </tbody>
             </table>
           </div>
-        ) : (history.length === 0 ? (
+        ) : (filteredHistory.length === 0 ? (
           <div className="text-sm text-gray-500">No transactions yet.</div>
         ) : (
           <div className="overflow-auto border rounded-xl">
@@ -659,7 +752,7 @@ export default function ImpactReportPanel() {
                 </tr>
               </thead>
               <tbody>
-                {history.map((h, index) => {
+                {filteredHistory.map((h, index) => {
                   const uid = currentUid;
                   const isSeller = h && String(h.sellerId || '') === String(uid);
                   const counterpartyId = isSeller ? h.buyerId : h.sellerId;
@@ -803,6 +896,6 @@ function formatDate(ts) {
     if (!ts) return '';
     const d = typeof ts.toDate === 'function' ? ts.toDate() : new Date(ts);
     if (isNaN(d)) return '';
-    return d.toLocaleString();
+    return d.toLocaleDateString();
   } catch (_) { return ''; }
 }
