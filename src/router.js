@@ -12,6 +12,7 @@ import Signup from './pages/Signup';
 import NotFound from './pages/NotFound';
 import UploadProduct from './pages/UploadProduct';
 import ProtectedRoute from './components/ProtectedRoute';
+import AdminProtectedRoute from './components/AdminProtectedRoute';
 import AdminDashboard from './admin/AdminDashboard';
 import SellerDashboard from './pages/SellerDashboard';
 import Listings from './pages/Listings';
@@ -47,7 +48,7 @@ export const router = createBrowserRouter([
       { path: 'upload', element: <ProtectedRoute><UploadProduct /></ProtectedRoute> },
       { path: 'login', element: <Login /> },
       { path: 'signup', element: <Signup /> },
-      { path: 'admin', element: <ProtectedRoute><AdminDashboard /></ProtectedRoute> },
+      { path: 'admin', element: <AdminProtectedRoute><AdminDashboard /></AdminProtectedRoute> },
       { path: 'listings', element: <ProtectedRoute><Listings /></ProtectedRoute> },
       { path: 'dashboard', element: <ProtectedRoute><SellerDashboard /></ProtectedRoute> },
       { path: 'settings', element: <ProtectedRoute><UserSettings /></ProtectedRoute> },

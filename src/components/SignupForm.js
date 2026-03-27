@@ -39,6 +39,7 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
   const [password,setPassword] = useState('')
   const [confirm,setConfirm] = useState('')
   const [error,setError] = useState('')
+  const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [verificationSent, setVerificationSent] = useState(false);
   const [checkingVerification, setCheckingVerification] = useState(false);
@@ -66,7 +67,23 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
     setError('');
     if (!validateAll()) return;
     try {
+      setSubmitting(true);
       const normalizedEmail = email.trim().toLowerCase();
+      // Preflight check: ensure email is available
+      try {
+        const check = await fetch('/api/auth/check-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: normalizedEmail }) });
+        if (check.ok) {
+          const checkJson = await check.json();
+          if (!checkJson.available) {
+            setError('Email already exists');
+            setSubmitting(false);
+            return;
+          }
+        }
+      } catch (e) {
+        // If check fails, continue to attempt signup (server will still validate)
+        console.warn('Email availability check failed, proceeding to signup', e);
+      }
       const isAdminEmail = normalizedEmail === 'admin@agapay.com' || normalizedEmail === 'admin@gmail.com';
       const resolvedRole = isAdminEmail ? 'admin' : 'user';
       const res = await fetch('/api/auth/signup', {
@@ -86,6 +103,7 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
         const j = await res.json().catch(()=>({ error: 'Signup failed' }));
         if (res.status === 409) setError(j.error || 'Email already exists');
         else setError(j.error || 'Signup failed');
+        setSubmitting(false);
         return;
       }
       const json = await res.json();
@@ -120,9 +138,11 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
         if (isAdmin) { window.location.replace('/admin'); return; }
         if (onSuccess) onSuccess(cred.user);
       }
+      setSubmitting(false);
     } catch (err) {
       console.error('Signup error', err);
       setError('Sign up failed: ' + (err.message || String(err)));
+      setSubmitting(false);
     }
   }
 
@@ -187,7 +207,7 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
   {fieldErrors.password && <div className="text-red-500 text-sm">{fieldErrors.password}</div>}
   <input value={confirm} onChange={e=>{ setConfirm(e.target.value); onFieldDirty && onFieldDirty(); }} type="password" placeholder="Confirm password" className="p-2 border rounded" />
   {fieldErrors.confirm && <div className="text-red-500 text-sm">{fieldErrors.confirm}</div>}
-      <button className="p-2 bg-teal-600 text-white rounded">Create account</button>
+      <button className="p-2 bg-teal-600 text-white rounded" disabled={submitting}>{submitting ? 'Creating...' : 'Create account'}</button>
       <button type="button" className="p-2 bg-red-500 text-white rounded mt-2" onClick={handleGoogleSignup}>
         Sign Up with Google
       </button>

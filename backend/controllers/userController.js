@@ -717,3 +717,80 @@ exports.banUser = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+// Admin: unban a user by id/email/uid
+// - Re-enables Firebase Auth sign-in for the user (updateUser({ disabled: false }))
+// - Clears Firestore banned flags: { status: 'active', banned: false, unbannedAt }
+exports.unbanUser = async (req, res) => {
+  try {
+    const allowAll = process.env.REPORTS_DEV_ALLOW_ALL === 'true' || process.env.NODE_ENV !== 'production';
+    const isAdmin = !!(req.user && (req.user.isAdmin || req.user.admin || req.user.role === 'admin' || (req.user.roles || []).includes('admin') || (req.user.customClaims && (req.user.customClaims.isAdmin || req.user.customClaims.admin || req.user.customClaims.role === 'admin'))));
+    if (!isAdmin && !allowAll) return res.status(403).json({ error: 'forbidden' });
+
+    const id = String(req.params.id);
+    const reason = (req.body && (req.body.reason || req.body.details)) || null;
+
+    let docRef = db.collection('users').doc(id);
+    let doc = await docRef.get();
+    if (!doc.exists) {
+      const byAuth = await db.collection('users').where('authId', '==', id).limit(1).get();
+      if (!byAuth.empty) { docRef = byAuth.docs[0].ref; doc = byAuth.docs[0]; }
+    }
+    if (!doc.exists && id.includes('@')) {
+      const byEmail = await db.collection('users').where('email', '==', id).limit(1).get();
+      if (!byEmail.empty) { docRef = byEmail.docs[0].ref; doc = byEmail.docs[0]; }
+    }
+    if (!doc.exists) return res.status(404).json({ error: 'user_not_found' });
+
+    const data = doc.data() || {};
+    const uid = data.authId || data.uid || data.userId || doc.id;
+
+    // Re-enable Firebase Auth (best-effort)
+    let enabledAuth = false;
+    try {
+      await admin.auth().updateUser(uid, { disabled: false });
+      enabledAuth = true;
+    } catch (e) {
+      console.warn('unbanUser: failed to enable auth user', uid, e && e.message);
+    }
+
+    const stamp = admin.firestore.FieldValue.serverTimestamp();
+    const payload = { status: 'active', banned: false, updatedAt: stamp, unbannedAt: stamp };
+    if (reason) payload.unbanReason = String(reason);
+    await docRef.set(payload, { merge: true });
+
+    res.json({ ok: true, userId: docRef.id, enabledAuth });
+  } catch (err) {
+    console.error('unbanUser error', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Admin: archive a user profile (non-destructive)
+// - Marks profile as archived: { archived: true, status: 'archived', archivedAt }
+// - Does not delete Firestore document, preserving history
+exports.archiveUser = async (req, res) => {
+  try {
+    const allowAll = process.env.REPORTS_DEV_ALLOW_ALL === 'true' || process.env.NODE_ENV !== 'production';
+    const isAdmin = !!(req.user && (req.user.isAdmin || req.user.admin || req.user.role === 'admin' || (req.user.roles || []).includes('admin') || (req.user.customClaims && (req.user.customClaims.isAdmin || req.user.customClaims.admin || req.user.customClaims.role === 'admin'))));
+    if (!isAdmin && !allowAll) return res.status(403).json({ error: 'forbidden' });
+
+    const id = String(req.params.id);
+    const reason = (req.body && (req.body.reason || req.body.details)) || null;
+
+    // Resolve document similar to other helpers
+    const usersCol = db.collection('users');
+    let resolved = await findUserDocument(usersCol, id);
+    if (!resolved) return res.status(404).json({ error: 'user_not_found' });
+
+    const stamp = admin.firestore.FieldValue.serverTimestamp();
+    const payload = { archived: true, status: 'archived', archivedAt: stamp, updatedAt: stamp, active: false };
+    if (reason) payload.archiveReason = String(reason);
+    await resolved.ref.set(payload, { merge: true });
+
+    res.json({ ok: true, userId: resolved.ref.id });
+  } catch (err) {
+    console.error('archiveUser error', err);
+    res.status(500).json({ error: err.message });
+  }
+};

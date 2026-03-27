@@ -477,6 +477,38 @@ exports.createProduct = async (req, res) => {
       }
     } catch (e) { console.warn('Admin notify for new product failed', e && e.message); }
 
+    // Create in-app notification for the seller that their product is awaiting approval
+    try {
+      if (sellerId) {
+        await db.collection('notifications').add({
+          userId: sellerId,
+          productId: ref.id,
+          type: 'product_pending',
+          title: 'Product submitted for review',
+          message: `Your product "${newProduct.title}" is awaiting admin approval.`,
+          read: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to create in-app notification for seller on product submission', e && e.message);
+    }
+
+    // Create a lightweight admin-targeted notification (forAdmin flag) so admins can see a stream
+    try {
+      await db.collection('notifications').add({
+        forAdmin: true,
+        productId: ref.id,
+        type: 'product_pending_admin',
+        title: 'New product awaiting review',
+        message: `${newProduct.sellerName || 'A seller'} submitted "${newProduct.title}" for approval.`,
+        read: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn('Failed to create admin in-app notification for product submission', e && e.message);
+    }
+
     res.status(201).json(resp);
   } catch (err) {
     console.error('Error creating product:', err);
@@ -583,6 +615,24 @@ exports.updateProduct = async (req, res) => {
             const subject = 'Your product has been approved';
             const text = `Your product "${pd.title || 'untitled'}" has been approved and is now live on the marketplace.`;
             await sendNotificationEmail(email, subject, text, `<p>${text}</p>`);
+            // Also create an in-app notification document for the seller
+            try {
+              const adminId = (req.user && (req.user.id || req.user.uid || req.user.authId)) || null;
+              const adminName = (req.user && (req.user.displayName || req.user.name || req.user.username || req.user.email)) || null;
+              await db.collection('notifications').add({
+                userId: sellerId,
+                productId: doc.id,
+                type: 'product_approved',
+                title: subject,
+                message: text,
+                read: false,
+                adminId,
+                adminName,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+            } catch (e) {
+              console.warn('Failed to create in-app notification for approve', e && e.message);
+            }
           }
         }
       } catch (err) {
@@ -603,6 +653,23 @@ exports.updateProduct = async (req, res) => {
             const message = pd.adminMessage || 'Your product was denied by the admin.';
             const text = `Your product "${pd.title || 'untitled'}" was denied. Reason: ${message}`;
             await sendNotificationEmail(email, subject, text, `<p>${text}</p>`);
+            try {
+              const adminId = (req.user && (req.user.id || req.user.uid || req.user.authId)) || null;
+              const adminName = (req.user && (req.user.displayName || req.user.name || req.user.username || req.user.email)) || null;
+              await db.collection('notifications').add({
+                userId: sellerId,
+                productId: doc.id,
+                type: 'product_denied',
+                title: subject,
+                message: text,
+                read: false,
+                adminId,
+                adminName,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+            } catch (e) {
+              console.warn('Failed to create in-app notification for deny', e && e.message);
+            }
           }
         }
       } catch (err) {

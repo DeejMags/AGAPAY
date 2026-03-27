@@ -6,25 +6,28 @@ exports.register = async (req, res) => {
 
     if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
 
-    // Try to create user in Firebase Auth. If the email already exists in Auth
-    // we will return a helpful message and ensure the Firestore profile exists.
-    let userRecord;
+    // Normalize email for consistent comparisons
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    // Check Firestore users collection first for existing email
+    const usersRef = db.collection('users');
+    const existingProfileQ = await usersRef.where('email', '==', normalizedEmail).limit(1).get();
+    if (!existingProfileQ.empty) return res.status(409).json({ error: 'Email already exists!' });
+
+    // Check Firebase Auth for existing user with this email
     try {
-      userRecord = await admin.auth().createUser({ email, password });
-    } catch (err) {
-      // If the user already exists in Firebase Auth, ensure a profile exists in Firestore
-      if (err.code === 'auth/email-already-exists' || (err.message && err.message.includes('email already exists'))) {
-        // Try to lookup the existing auth user
-        try {
-          userRecord = await admin.auth().getUserByEmail(email);
-        } catch (e) {
-          console.error('Failed to get existing auth user for email already-in-use case', e);
-          return res.status(409).json({ error: 'Email already exists' });
-        }
-      } else {
-        throw err;
+      const existingAuthUser = await admin.auth().getUserByEmail(normalizedEmail);
+      if (existingAuthUser) return res.status(409).json({ error: 'Email already exists!' });
+    } catch (e) {
+      // getUserByEmail throws if not found; ignore that case
+      if (e.code && e.code !== 'auth/user-not-found') {
+        console.error('Unexpected error checking auth user by email', e);
+        return res.status(500).json({ error: 'Server error' });
       }
     }
+
+    // Safe to create a new Auth user
+    const userRecord = await admin.auth().createUser({ email: normalizedEmail, password });
 
     const createdAt = admin.firestore.FieldValue.serverTimestamp();
     // Derive consistent name fields
@@ -48,16 +51,16 @@ exports.register = async (req, res) => {
     };
     // Store minimal profile in Firestore and reference the auth uid. If a
     // profile with the same authId already exists, update it; otherwise create.
-    const usersRef = db.collection('users');
+    // Ensure we perform profile lookup by authId after creating the auth user
     const q = await usersRef.where('authId', '==', userRecord.uid).limit(1).get();
     if (!q.empty) {
       const doc = q.docs[0];
-      await usersRef.doc(doc.id).update({ email, ...baseProfile, updatedAt: createdAt });
-      return res.status(200).json({ id: doc.id, authId: userRecord.uid, email, ...baseProfile });
+      await usersRef.doc(doc.id).update({ email: normalizedEmail, ...baseProfile, updatedAt: createdAt });
+      return res.status(200).json({ id: doc.id, authId: userRecord.uid, email: normalizedEmail, ...baseProfile });
     }
 
     // If no profile exists, create a new one keyed by authId
-    const profile = { authId: userRecord.uid, email, ...baseProfile, createdAt };
+    const profile = { authId: userRecord.uid, email: normalizedEmail, ...baseProfile, createdAt };
     const ref = await usersRef.add(profile);
     res.status(201).json({ id: ref.id, authId: userRecord.uid, email, ...baseProfile });
   } catch (err) {
@@ -69,11 +72,33 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    const snapshot = await db
-      .collection('users')
-      .where('email', '==', email)
-      .get();
-    if (snapshot.empty) return res.status(401).json({ error: 'Invalid credentials' });
+    const norm = String(email || '').trim();
+    const lower = norm.toLowerCase();
+
+    // Try exact match first, then lowercase match
+    let snapshot = await db.collection('users').where('email', '==', norm).get();
+    if (snapshot.empty && lower !== norm) {
+      snapshot = await db.collection('users').where('email', '==', lower).get();
+    }
+
+    // If not found in Firestore, try to resolve via Firebase Auth then find profile by authId
+    if (snapshot.empty) {
+      try {
+        const authUser = await admin.auth().getUserByEmail(norm).catch(() => null);
+        if (authUser) {
+          const byAuth = await db.collection('users').where('authId', '==', authUser.uid).limit(1).get();
+          if (!byAuth.empty) {
+            const doc = byAuth.docs[0];
+            return res.json({ id: doc.id, ...doc.data() });
+          }
+          // If no Firestore profile exists, return a minimal profile built from auth user
+          return res.json({ id: authUser.uid, authId: authUser.uid, email: authUser.email || norm, username: authUser.displayName || null });
+        }
+      } catch (e) {
+        // ignore and fall through
+      }
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
     // We don't store plaintext passwords anymore; this endpoint only returns profile by email.
     const user = snapshot.docs[0];
@@ -123,6 +148,31 @@ exports.google = async (req, res) => {
     res.status(201).json({ id: ref.id, ...profile });
   } catch (err) {
     console.error('google profile ensure error', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Check availability of an email address (returns { available: true/false })
+exports.checkEmail = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const usersRef = db.collection('users');
+    const q = await usersRef.where('email', '==', normalizedEmail).limit(1).get();
+    if (!q.empty) return res.json({ available: false });
+    try {
+      const u = await admin.auth().getUserByEmail(normalizedEmail);
+      if (u) return res.json({ available: false });
+    } catch (e) {
+      if (e.code && e.code !== 'auth/user-not-found') {
+        console.error('Error checking auth for email', e);
+        return res.status(500).json({ error: 'Server error' });
+      }
+    }
+    return res.json({ available: true });
+  } catch (err) {
+    console.error('checkEmail error', err);
     res.status(500).json({ error: err.message });
   }
 };

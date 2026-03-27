@@ -15,6 +15,8 @@ router.put('/:id', firebaseCtrl.updateUser)
 router.delete('/:id', firebaseCtrl.deleteUser)
 // Admin: ban a user by id/email/uid
 router.post('/:id/ban', auth, firebaseCtrl.banUser)
+router.post('/:id/unban', auth, firebaseCtrl.unbanUser)
+router.post('/:id/archive', auth, firebaseCtrl.archiveUser)
 // Deactivate currently authenticated user
 router.post('/deactivate', auth, firebaseCtrl.deactivateSelf)
 

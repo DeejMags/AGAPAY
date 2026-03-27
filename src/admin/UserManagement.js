@@ -9,6 +9,9 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [confirmMode, setConfirmMode] = useState(null); // 'ban' | 'delete'
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [banReason, setBanReason] = useState('');
+  const [archiveReason, setArchiveReason] = useState('');
   // Removed typed delete confirmation; immediate delete now
 
   // Toast / notification
@@ -157,45 +160,112 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
     }
   }
 
-  async function handleBan(id) {
+  // Non-destructive archive: mark profile as archived instead of deleting
+  async function handleArchive(id, reason) {
+    const stringId = typeof id === 'string' ? id : String(id);
+    let archived = false;
     try {
-      // Preferred: backend ban endpoint disables Firebase Auth and sets Firestore flags
-      const res = await authFetch(`/api/users/${encodeURIComponent(id)}/ban`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'Banned by admin' })
+      const res = await authFetch(`/api/users/${encodeURIComponent(stringId)}/archive`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason || null })
       });
-      if (!res.ok) throw new Error('Backend ban failed');
-      // log admin action
-      try {
-        const adminUser = JSON.parse(localStorage.getItem('user') || 'null');
-        const adminId = (adminUser && (adminUser.id || adminUser.authId)) || (auth && auth.currentUser && auth.currentUser.uid) || null;
-        await addDoc(collection(db, 'admin_logs'), { action: 'ban_user', targetId: id, adminId, timestamp: serverTimestamp(), success: true });
-      } catch (e) { console.warn('Failed to write admin log for ban', e); }
+      if (!res.ok) throw new Error('Backend archive failed');
+      archived = true;
     } catch (err) {
-      // Fallback: mark Firestore profile as banned if backend is unavailable
-      await updateDoc(doc(db, 'users', id), { status: 'banned', banned: true, active: false });
       try {
-        const adminUser = JSON.parse(localStorage.getItem('user') || 'null');
-        const adminId = (adminUser && (adminUser.id || adminUser.authId)) || (auth && auth.currentUser && auth.currentUser.uid) || null;
-        await addDoc(collection(db, 'admin_logs'), { action: 'ban_user', targetId: id, adminId, timestamp: serverTimestamp(), success: true, note: 'fallback' });
-      } catch (e) { console.warn('Failed to write admin log for ban', e); }
+        await updateDoc(doc(db, 'users', stringId), { archived: true, status: 'archived', archivedAt: serverTimestamp(), active: false, archiveReason: reason || '' });
+        archived = true;
+      } catch (e) {
+        console.error('Archive fallback failed', e);
+        archived = false;
+      }
     }
-    const applyBanned = (u) => u.id === id ? { ...u, status: 'banned', banned: true, active: false } : u;
-    setUsers(prev => prev.map(applyBanned));
-    if (setParentUsers) setParentUsers(prev => prev.map(applyBanned));
-    setNotifyText('User banned'); setNotifySuccess(true); setNotifyOpen(true);
+
+    // write admin log
+    try {
+      const adminUser = JSON.parse(localStorage.getItem('user') || 'null');
+      const adminId = (adminUser && (adminUser.id || adminUser.authId)) || (auth && auth.currentUser && auth.currentUser.uid) || null;
+      await addDoc(collection(db, 'admin_logs'), { action: 'archive_user', targetId: stringId, adminId, timestamp: serverTimestamp(), success: archived });
+    } catch (e) {
+      console.warn('Failed to write admin log for archive', e);
+    }
+
+    if (archived) {
+      const applyArchived = (u) => u.id === stringId ? { ...u, archived: true, status: 'archived', active: false } : u;
+      setUsers(prev => prev.map(applyArchived));
+      if (setParentUsers) setParentUsers(prev => prev.map(applyArchived));
+      setNotifyText('User archived'); setNotifySuccess(true); setNotifyOpen(true);
+    } else {
+      setNotifyText('Failed to archive user'); setNotifySuccess(false); setNotifyOpen(true);
+    }
+  }
+
+  function handleBan(id) {
+    // Accept optional reason via closure
+    return async function(doReason) {
+      const reason = doReason || 'Banned by admin';
+      try {
+        const res = await authFetch(`/api/users/${encodeURIComponent(id)}/ban`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason })
+        });
+        if (!res.ok) throw new Error('Backend ban failed');
+        try {
+          const adminUser = JSON.parse(localStorage.getItem('user') || 'null');
+          const adminId = (adminUser && (adminUser.id || adminUser.authId)) || (auth && auth.currentUser && auth.currentUser.uid) || null;
+          await addDoc(collection(db, 'admin_logs'), { action: 'ban_user', targetId: id, adminId, timestamp: serverTimestamp(), success: true });
+        } catch (e) { console.warn('Failed to write admin log for ban', e); }
+      } catch (err) {
+        // Fallback: mark Firestore profile as banned if backend is unavailable
+        try {
+          await updateDoc(doc(db, 'users', id), { status: 'banned', banned: true, active: false, bannedAt: serverTimestamp(), banReason: doReason || 'Banned by admin' });
+        } catch (e) { console.error('Fallback ban failed', e); }
+        try {
+          const adminUser = JSON.parse(localStorage.getItem('user') || 'null');
+          const adminId = (adminUser && (adminUser.id || adminUser.authId)) || (auth && auth.currentUser && auth.currentUser.uid) || null;
+          await addDoc(collection(db, 'admin_logs'), { action: 'ban_user', targetId: id, adminId, timestamp: serverTimestamp(), success: true, note: 'fallback' });
+        } catch (e) { console.warn('Failed to write admin log for ban', e); }
+      }
+      const applyBanned = (u) => u.id === id ? { ...u, status: 'banned', banned: true, active: false } : u;
+      setUsers(prev => prev.map(applyBanned));
+      if (setParentUsers) setParentUsers(prev => prev.map(applyBanned));
+      setNotifyText('User banned'); setNotifySuccess(true); setNotifyOpen(true);
+      return true;
+    };
+  }
+
+  async function handleUnban(id) {
+    try {
+      const res = await authFetch(`/api/users/${encodeURIComponent(id)}/unban`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Unbanned by admin' }) });
+      if (!res.ok) throw new Error('Backend unban failed');
+      // update UI
+      const applyUnbanned = (u) => u.id === id ? { ...u, status: 'active', banned: false, active: true } : u;
+      setUsers(prev => prev.map(applyUnbanned));
+      if (setParentUsers) setParentUsers(prev => prev.map(applyUnbanned));
+      setNotifyText('User unbanned'); setNotifySuccess(true); setNotifyOpen(true);
+    } catch (err) {
+      try {
+        await updateDoc(doc(db, 'users', id), { status: 'active', banned: false, active: true, unbannedAt: serverTimestamp() });
+        const applyUnbanned = (u) => u.id === id ? { ...u, status: 'active', banned: false, active: true } : u;
+        setUsers(prev => prev.map(applyUnbanned));
+        if (setParentUsers) setParentUsers(prev => prev.map(applyUnbanned));
+        setNotifyText('User unbanned'); setNotifySuccess(true); setNotifyOpen(true);
+      } catch (e) {
+        console.error('Unban fallback failed', e);
+        setNotifyText('Failed to unban user'); setNotifySuccess(false); setNotifyOpen(true);
+      }
+    }
   }
 
   function openBanConfirm(id) {
     setConfirmMode('ban');
     setConfirmTarget(id);
+    setBanReason('');
     setConfirmOpen(true);
   }
 
   function openDeleteConfirm(id) {
-    setConfirmMode('delete');
+    setConfirmMode('archive');
     setConfirmTarget(id);
+    setArchiveReason('');
     setConfirmOpen(true);
   }
 
@@ -293,7 +363,21 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
                         const isBanned = u.banned === true || status === 'banned' || status.includes('ban') || (u.active === false && status !== 'active');
                         if (isBanned) {
                           return (
-                            <span className="px-2 py-1 rounded bg-red-100 text-red-700 font-medium">Banned</span>
+                            <>
+                              <span className="px-2 py-1 rounded bg-red-100 text-red-700 font-medium">Banned</span>
+                              <button
+                                className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 transition"
+                                onClick={() => { setConfirmMode('unban'); setConfirmTarget(u.id); setConfirmOpen(true); }}
+                                aria-label={`Unban ${getDisplayName(u) || u.id}`}>
+                                Unban
+                              </button>
+                              <button
+                                className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition"
+                                onClick={() => openDeleteConfirm(u.id)}
+                                aria-label={`Archive ${getDisplayName(u) || u.id}`}>
+                                Archive
+                              </button>
+                            </>
                           );
                         }
                         return (
@@ -307,8 +391,8 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
                             <button
                               className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition"
                               onClick={() => openDeleteConfirm(u.id)}
-                              aria-label={`Delete ${getDisplayName(u) || u.id}`}>
-                              Delete
+                              aria-label={`Archive ${getDisplayName(u) || u.id}`}>
+                              Archive
                             </button>
                           </>
                         );
@@ -325,35 +409,60 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
       {/* Ban confirmation modal */}
       <Modal
         open={confirmOpen && !!confirmTarget}
-        title={confirmMode === 'delete' ? 'Confirm deletion' : 'Confirm ban'}
-  onCancel={() => { setConfirmOpen(false); setConfirmTarget(null); setConfirmMode(null); }}
+        title={confirmMode === 'archive' ? 'Confirm archive' : (confirmMode === 'unban' ? 'Confirm unban' : 'Confirm ban')}
+      onCancel={() => { setConfirmOpen(false); setConfirmTarget(null); setConfirmMode(null); setBanReason(''); setArchiveReason(''); }}
         onConfirm={async () => {
           const id = confirmTarget;
           const mode = confirmMode;
-          // require typed confirmation for delete
+          setConfirmLoading(true);
+          // require typed confirmation for archive
           setConfirmOpen(false);
           setConfirmTarget(null);
           setConfirmMode(null);
-          if (!id) return;
-          if (mode === 'ban') return await handleBan(id);
-          return await handleDelete(id);
+          if (!id) { setConfirmLoading(false); return; }
+          try {
+            if (mode === 'ban') {
+              // handleBan returns a closure — call it with the reason
+              await handleBan(id)(banReason || 'Banned by admin');
+            } else if (mode === 'archive') {
+              await handleArchive(id, archiveReason || null);
+            } else if (mode === 'unban') {
+              await handleUnban(id);
+            }
+          } finally {
+            setConfirmLoading(false);
+          }
         }}
-        confirmLabel={confirmMode === 'delete' ? 'Delete user' : 'Ban user'}
-        confirmDanger={confirmMode === 'delete'}
+        confirmLabel={confirmMode === 'archive' ? 'Archive user' : (confirmMode === 'unban' ? 'Unban user' : 'Ban user')}
+        confirmDanger={confirmMode === 'archive'}
       >
         {(() => {
           const targetUser = users.find(x => x.id === confirmTarget) || {};
           const displayName = targetUser.username || targetUser.name || targetUser.email || confirmTarget;
-          if (confirmMode === 'delete') {
+          if (confirmMode === 'archive') {
             return (
               <>
-                <div className="mb-2">You are about to permanently delete <strong>{displayName}</strong>. This action cannot be undone.</div>
-                <div className="text-sm text-red-600">Click "Delete user" to proceed.</div>
+                <div className="mb-2">You are about to archive <strong>{displayName}</strong>. This will preserve their profile for history but mark it archived.</div>
+                <div className="mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Archive reason (optional)</label>
+                  <textarea value={archiveReason} onChange={e=>setArchiveReason(e.target.value)} className="w-full border rounded p-2 mt-1" rows={3} />
+                </div>
+              </>
+            );
+          }
+          if (confirmMode === 'ban') {
+            return (
+              <>
+                <div className="mb-2">Are you sure you want to ban <strong>{displayName}</strong>? This action will mark their account as Banned.</div>
+                <div className="mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Ban reason</label>
+                  <textarea value={banReason} onChange={e=>setBanReason(e.target.value)} className="w-full border rounded p-2 mt-1" rows={4} placeholder="Describe why this user is being banned (policy violation, spam, etc.)" />
+                </div>
               </>
             );
           }
           return (
-            <div>Are you sure you want to ban <strong>{displayName}</strong>? This action will mark their account as Banned.</div>
+            <div>Are you sure you want to unban <strong>{displayName}</strong>? This will restore access for the user.</div>
           );
         })()}
       </Modal>
@@ -370,7 +479,7 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
 }
 
 // Simple modal components inserted here to avoid new dependencies
-function Modal({ open, title, children, onCancel, onConfirm, confirmLabel = 'Confirm' }) {
+function Modal({ open, title, children, onCancel, onConfirm, confirmLabel = 'Confirm', confirmDanger = false }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -380,7 +489,7 @@ function Modal({ open, title, children, onCancel, onConfirm, confirmLabel = 'Con
         <div className="flex justify-end gap-2">
           <button className="px-3 py-1 rounded bg-gray-200" onClick={onCancel}>Cancel</button>
           <button
-            className={`px-3 py-1 rounded ${confirmLabel.toLowerCase().includes('delete') ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-teal-600 text-white'}`}
+            className={`px-3 py-1 rounded ${confirmDanger ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-teal-600 text-white'}`}
             onClick={onConfirm}
           >{confirmLabel}</button>
         </div>

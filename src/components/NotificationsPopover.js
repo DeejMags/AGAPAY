@@ -99,6 +99,61 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, meId]);
 
+  // Load personal in-app notifications from Firestore (e.g., product approved)
+  useEffect(() => {
+    if (!open || !meId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { db } = await import('../firebase');
+        const { collection, query, where, orderBy, limit, getDocs } = await import('firebase/firestore');
+        const q = query(collection(db, 'notifications'), where('userId', '==', String(meId)), orderBy('createdAt', 'desc'), limit(50));
+        const snap = await getDocs(q);
+        if (cancelled) return;
+        const list = snap.docs.map(d => ({
+          id: `notif:${d.id}`,
+          otherId: d.data().adminId || null,
+          otherName: d.data().adminName || d.data().title || 'Notification',
+          text: d.data().message || '',
+          ts: d.data().createdAt ? (d.data().createdAt.toDate ? d.data().createdAt.toDate().getTime() : Number(d.data().createdAt)) : Date.now(),
+          unread: !d.data().read,
+          icon: '🔔',
+        }));
+        // Merge notifications by prepending so they appear first
+        setSystemNotifs(prev => {
+          // avoid duplicate ids
+          const existingIds = new Set(prev.map(p => p.id));
+          const newOnes = list.filter(l => !existingIds.has(l.id));
+          return [...newOnes, ...prev];
+        });
+        // Backfill admin profiles for notification authors (so avatar/name can be shown)
+        const adminIds = Array.from(new Set(list.map(x => x.otherId).filter(Boolean)));
+        adminIds.forEach(async (aid) => {
+          if (profileCache[aid]) return;
+          // try backend first
+          try {
+            const res = await authFetch(`/api/users/${encodeURIComponent(aid)}`);
+            if (res.ok) {
+              const u = await res.json();
+              setProfileCache(prev => ({ ...prev, [aid]: u }));
+              return;
+            }
+          } catch {}
+          // firestore fallback
+          try {
+            const { db } = await import('../firebase');
+            const { doc, getDoc } = await import('firebase/firestore');
+            const snap2 = await getDoc(doc(db, 'users', String(aid)));
+            if (snap2.exists()) setProfileCache(prev => ({ ...prev, [aid]: { id: snap2.id, ...snap2.data() } }));
+          } catch {}
+        });
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, meId]);
+
   useEffect(() => {
     if (isAdmin && adminCounts) {
       setAdminSummary(prev => {
@@ -156,7 +211,28 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
           icon: '🚨',
           targetSection: 'report',
         }));
-        const combined = [...productNotifs, ...reportNotifs].sort((a,b) => (b.ts || 0) - (a.ts || 0));
+        // Also fetch any admin-targeted in-app notifications (created with forAdmin=true)
+        let adminNotifList = [];
+        try {
+          const { db } = await import('../firebase');
+          const { collection, query, where, orderBy, limit, getDocs } = await import('firebase/firestore');
+          const q = query(collection(db, 'notifications'), where('forAdmin', '==', true), orderBy('createdAt', 'desc'), limit(50));
+          const snap = await getDocs(q);
+          adminNotifList = snap.docs.map(d => ({
+            id: `adminnotif:${d.id}`,
+            otherId: d.data().adminId || null,
+            otherName: d.data().adminName || d.data().title || 'System',
+            text: d.data().message || '',
+            ts: d.data().createdAt ? (d.data().createdAt.toDate ? d.data().createdAt.toDate().getTime() : Number(d.data().createdAt)) : Date.now(),
+            unread: !d.data().read,
+            icon: '📦',
+            targetSection: 'products',
+          }));
+        } catch (e) {
+          adminNotifList = [];
+        }
+
+        const combined = [...adminNotifList, ...productNotifs, ...reportNotifs].sort((a,b) => (b.ts || 0) - (a.ts || 0));
         setSystemNotifs(combined);
         setAdminSummary({ pendingProducts: pendingProducts.length, openReports: openReports.length });
       } catch (err) {

@@ -143,8 +143,8 @@ export default function Navbar(){
   return (
     <>
       {loading && <FullScreenLoader />}
-    <nav className="w-full bg-white border-b animate-fadeIn fixed top-0 left-0 z-50 shadow-lg">
-      <div className="container mx-auto px-4 py-3 flex items-center justify-between relative">
+  <nav className="w-full bg-white border-b animate-fadeIn fixed top-0 left-0 z-50 shadow-lg">
+        <div className="container mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-4">
             {/* Logo no longer navigates; Home icon handles navigation */}
             <div className="flex items-center gap-3 select-none">
@@ -168,10 +168,7 @@ export default function Navbar(){
           </div>
 
     {(!user || user.role !== 'admin') && (
-            <form
-              onSubmit={e=>{e.preventDefault(); navigate(`/marketplace?search=${encodeURIComponent(search)}`);}}
-              className="hidden md:block absolute left-1/2 transform -translate-x-1/2 w-full max-w-3xl px-4"
-            >
+            <form className="flex-1 mx-2 sm:mx-8" onSubmit={e=>{e.preventDefault(); navigate(`/marketplace?search=${encodeURIComponent(search)}`);}}>
             <div className="relative w-full max-w-xs sm:max-w-lg mx-auto flex items-center gap-3">
               {/* Home icon with label */}
               <button

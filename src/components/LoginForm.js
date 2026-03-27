@@ -29,6 +29,21 @@ function mapAuthError(err) {
   }
 }
 
+function getBanReason(source) {
+  if (!source) return '';
+  // If it's an Error-like object
+  if (typeof source === 'string') return source;
+  if (source.message) return String(source.message);
+  // Common backend field names for ban/reason
+  const fields = ['banReason','reason','ban_reason','ban_reason_description','description','message','disabledReason','statusMessage','note','status_reason','banReasonText'];
+  for (const f of fields) {
+    if (source[f]) return String(source[f]);
+  }
+  // If profile contains a status that explains ban, include it
+  if (source.status && String(source.status).toLowerCase().includes('ban')) return String(source.status);
+  return '';
+}
+
 export default function LoginForm({ onSuccess }){
   const [bannedOpen, setBannedOpen] = useState(false);
   const [bannedMsg, setBannedMsg] = useState('Your account has been banned for violating our policies. If you believe this is a mistake, please contact support.');
@@ -58,7 +73,8 @@ export default function LoginForm({ onSuccess }){
         if (pBanned) {
           try { await auth.signOut(); } catch {}
           try { localStorage.removeItem('user'); localStorage.removeItem('token'); } catch {}
-          openBannedModal('Your account is banned and cannot log in.', profile.banReason || profile.reason);
+          const reason = getBanReason(profile) || profile.banReason || profile.reason || '';
+          openBannedModal('Your account is banned and cannot log in.', reason);
           return;
         }
         const isAdmin = user.email === 'admin@agapay.com' || user.email === 'admin@gmail.com';
@@ -72,13 +88,24 @@ export default function LoginForm({ onSuccess }){
         setError('User does not exist. Please sign up first.');
         return;
       }
-    } catch (err) {
-      if (err && err.code === 'auth/user-disabled') {
-        openBannedModal('Your account is banned and cannot log in.');
-      } else {
-        setError(mapAuthError(err));
+      } catch (err) {
+        if (err && err.code === 'auth/user-disabled') {
+          let reason = getBanReason(err) || '';
+          const emailFromErr = (err && (err.email || (err.customData && err.customData.email))) || '';
+          if (emailFromErr) {
+            try {
+              const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: emailFromErr }) });
+              if (r.ok) {
+                const profile = await r.json();
+                reason = getBanReason(profile) || profile.banReason || profile.reason || reason;
+              }
+            } catch (e) {}
+          }
+          openBannedModal('Your account is banned and cannot log in.', reason);
+        } else {
+          setError(mapAuthError(err));
+        }
       }
-    }
   }
   const [email,setEmail] = useState('')
   const [password,setPassword] = useState('')
@@ -116,7 +143,8 @@ export default function LoginForm({ onSuccess }){
         if (pBanned) {
           try { await auth.signOut(); } catch {}
           try { localStorage.removeItem('user'); localStorage.removeItem('token'); } catch {}
-          openBannedModal('Your account is banned and cannot log in.', profile.banReason || profile.reason);
+          const reason = getBanReason(profile) || profile.banReason || profile.reason || '';
+          openBannedModal('Your account is banned and cannot log in.', reason);
           return;
         }
         localStorage.setItem('token', user.uid);
@@ -131,7 +159,15 @@ export default function LoginForm({ onSuccess }){
       }
     } catch (err) {
       if (err && err.code === 'auth/user-disabled') {
-        openBannedModal('Your account is banned and cannot log in.');
+        let reason = getBanReason(err) || '';
+        try {
+          const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+          if (r.ok) {
+            const profile = await r.json();
+            reason = getBanReason(profile) || profile.banReason || profile.reason || reason;
+          }
+        } catch (e) {}
+        openBannedModal('Your account is banned and cannot log in.', reason);
       } else {
         setError(mapAuthError(err));
       }
