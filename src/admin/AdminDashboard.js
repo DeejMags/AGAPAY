@@ -78,7 +78,68 @@ export default function AdminDashboard() {
     }
     loadUsers();
   }, []);
+
+  React.useEffect(() => {
+    async function loadOrders() {
+      try {
+        const qs = await getDocs(collection(db, 'orders'));
+        const list = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+        // sort newest first
+        list.sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+        setOrders(list);
+      } catch (err) {
+        console.error('Error loading orders from Firestore:', err);
+        setOrders([]);
+      }
+    }
+    loadOrders();
+
+    const onChanged = () => loadOrders();
+    window.addEventListener('orders-changed', onChanged);
+    const id = window.setInterval(loadOrders, 30000);
+    return () => {
+      window.removeEventListener('orders-changed', onChanged);
+      window.clearInterval(id);
+    };
+  }, []);
   const [orders, setOrders] = useState(initialOrders);
+  const lastSeenOrderIdRef = React.useRef(null);
+  const [orderPopup, setOrderPopup] = useState({ open: false, order: null });
+  React.useEffect(() => {
+    let cancelled = false;
+    async function checkLatest() {
+      try {
+        const { collection, query, orderBy, limit, getDocs } = await import('firebase/firestore');
+        const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(1));
+        const snap = await getDocs(q);
+        if (cancelled) return;
+        if (!snap || snap.empty) return;
+        const d = snap.docs[0];
+        const latest = { id: d.id, ...d.data() };
+        if (latest.id && latest.id !== lastSeenOrderIdRef.current) {
+          lastSeenOrderIdRef.current = latest.id;
+          setOrderPopup({ open: true, order: latest });
+        }
+      } catch (e) {
+        console.warn('Failed to fetch latest order for admin popup', e);
+      }
+    }
+    // Initialize last seen order id to avoid popping for existing orders
+    (async () => {
+      try {
+        const { collection, query, orderBy, limit, getDocs } = await import('firebase/firestore');
+        const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(1));
+        const snap = await getDocs(q);
+        if (!snap || snap.empty) return;
+        const d = snap.docs[0];
+        lastSeenOrderIdRef.current = d.id;
+      } catch (e) { /* ignore init error */ }
+    })();
+
+    const handler = () => { checkLatest(); };
+    window.addEventListener('orders-changed', handler);
+    return () => { cancelled = true; window.removeEventListener('orders-changed', handler); };
+  }, []);
   const [reportItems, setReportItems] = useState([]);
   const [notifications, setNotifications] = useState(initialNotifications);
   const [points, setPoints] = useState(initialPoints);
@@ -170,6 +231,23 @@ export default function AdminDashboard() {
         <span className={`block w-6 h-0.5 bg-teal-700 mb-1 transition-opacity duration-300 ${sidebarOpen ? 'opacity-0' : 'opacity-100'}`}></span>
         <span className={`block w-6 h-0.5 bg-teal-700 transform transition duration-300 ${sidebarOpen ? '-translate-y-1.5 -rotate-45' : ''}`}></span>
       </button>
+
+      {orderPopup.open && orderPopup.order && (
+        <div className="fixed top-4 right-4 z-50 w-80 bg-white border rounded-lg shadow-lg p-3">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="text-sm text-gray-500">New order received</div>
+              <div className="font-semibold mt-1">{orderPopup.order.productTitle || 'Order'}</div>
+              <div className="text-xs text-gray-600 mt-1">Type: {orderPopup.order.type || 'delivery'}</div>
+              <div className="text-xs text-gray-600">From: {orderPopup.order.buyerName || orderPopup.order.buyerId || 'Unknown'}</div>
+            </div>
+            <div className="ml-2 flex flex-col items-end">
+              <button className="text-sm text-gray-500 mb-2" onClick={() => { setOrderPopup({ open: false, order: null }); }}>Close</button>
+              <button className="text-xs bg-teal-600 text-white px-2 py-1 rounded" onClick={() => { setActivePage('orders'); setOrderPopup({ open: false, order: null }); }}>View</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="hidden lg:block">
         <Sidebar activePage={activePage} setActivePage={setActivePage} className="h-screen sticky top-0" />

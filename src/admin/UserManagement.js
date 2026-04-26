@@ -124,6 +124,7 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
 
   // Edit action removed: admin may use Ban/Delete which are handled below.
 
+  // eslint-disable-next-line no-unused-vars
   async function handleDelete(id) {
     const stringId = typeof id === 'string' ? id : String(id);
     let deleted = false;
@@ -435,6 +436,7 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
         }}
         confirmLabel={confirmMode === 'archive' ? 'Archive user' : (confirmMode === 'unban' ? 'Unban user' : 'Ban user')}
         confirmDanger={confirmMode === 'archive'}
+        confirmLoading={confirmLoading}
       >
         {(() => {
           const targetUser = users.find(x => x.id === confirmTarget) || {};
@@ -479,7 +481,7 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
 }
 
 // Simple modal components inserted here to avoid new dependencies
-function Modal({ open, title, children, onCancel, onConfirm, confirmLabel = 'Confirm', confirmDanger = false }) {
+function Modal({ open, title, children, onCancel, onConfirm, confirmLabel = 'Confirm', confirmDanger = false, confirmLoading = false }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -489,9 +491,10 @@ function Modal({ open, title, children, onCancel, onConfirm, confirmLabel = 'Con
         <div className="flex justify-end gap-2">
           <button className="px-3 py-1 rounded bg-gray-200" onClick={onCancel}>Cancel</button>
           <button
-            className={`px-3 py-1 rounded ${confirmDanger ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-teal-600 text-white'}`}
-            onClick={onConfirm}
-          >{confirmLabel}</button>
+              className={`px-3 py-1 rounded ${confirmDanger ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-teal-600 text-white'}`}
+              onClick={onConfirm}
+              disabled={confirmLoading}
+            >{confirmLoading ? 'Working...' : confirmLabel}</button>
         </div>
       </div>
     </div>

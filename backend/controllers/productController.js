@@ -907,3 +907,23 @@ exports.markSold = async (req, res) => {
     res.status(500).json({ error: err.message || String(err) });
   }
 };
+
+// Create an admin-targeted notification for an order (used by client after creating order)
+exports.notifyOrder = async (req, res) => {
+  try {
+    const { productId, productTitle, buyerId, sellerId, type } = req.body || {};
+    await db.collection('notifications').add({
+      forAdmin: true,
+      productId: productId || null,
+      title: `New ${type || 'delivery'} request`,
+      message: `${req.user && req.user.displayName ? req.user.displayName : (req.user && req.user.email) || 'A user'} requested ${type || 'delivery'} for "${productTitle || 'an item'}"`,
+      orderMeta: { buyerId: buyerId || null, sellerId: sellerId || null, type: type || null },
+      read: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    res.status(201).json({ success: true });
+  } catch (e) {
+    console.error('Failed to create admin notification for order via backend', e && e.message);
+    res.status(500).json({ error: 'notify_failed' });
+  }
+};

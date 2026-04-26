@@ -4,6 +4,10 @@ import { useParams, useNavigate } from 'react-router-dom'
 import RatingStars from '../components/RatingStars'
 import MapEmbed from '../components/MapEmbed'
 import ProductCard from "../components/ProductCard";
+import { createOrder } from '../firebaseProductService';
+import AdminNotifiedModal from '../components/AdminNotifiedModal';
+import deliveryIcon from '../deliverytruck.svg';
+import boxIcon from '../box.svg';
 
 export default function ProductDetail(){
   const { id } = useParams()
@@ -209,6 +213,27 @@ export default function ProductDetail(){
     })();
   }
 
+  async function handleOrder(type) {
+    try {
+      if (!product) return;
+      await createOrder({
+        productId: product._id || product.id,
+        productTitle: product.title || product.name,
+        sellerId: product.sellerId || product.owner || (seller && seller.id) || null,
+        type,
+      });
+      // show modal instead of alert
+      setNotifyModal({ open: true, type, title: product.title || product.name });
+      // Trigger reload for admin panels that poll for orders
+      window.dispatchEvent(new Event('orders-changed'));
+    } catch (e) {
+      console.error('Order creation failed', e);
+      alert('Failed to place order. Please sign in and try again.');
+    }
+  }
+
+  const [notifyModal, setNotifyModal] = useState({ open: false, type: 'delivery', title: '' });
+
   if(loading) return <FullScreenLoader />
 
   if(!product) return <div className="py-8 container mx-auto px-4">Product not found</div>
@@ -285,6 +310,25 @@ export default function ProductDetail(){
           >
             View seller profile
           </button>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button onClick={() => handleOrder('delivery')} className="w-full p-2 bg-blue-600 text-white rounded inline-flex items-center justify-center">
+              <img src={deliveryIcon} alt="delivery" className="w-4 h-4 mr-2" />
+              <span>Delivery</span>
+            </button>
+            <button onClick={() => handleOrder('pickup')} className="w-full p-2 bg-green-600 text-white rounded inline-flex items-center justify-center">
+              <img src={boxIcon} alt="pickup" className="w-4 h-4 mr-2" />
+              <span>Pickup</span>
+            </button>
+          </div>
+          {notifyModal.open && (
+            <AdminNotifiedModal
+              open={notifyModal.open}
+              type={notifyModal.type}
+              productTitle={notifyModal.title}
+              onClose={() => setNotifyModal({ open: false, type: 'delivery', title: '' })}
+            />
+          )}
 
           {/* Consolidated item location container placed directly under the View seller profile button */}
           <div className="mt-4 border rounded-lg p-3 bg-white">

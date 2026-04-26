@@ -32,7 +32,7 @@ export default function Navbar(){
   const { totalUnread } = useUnreadMessages();
 
   const [notifOpen, setNotifOpen] = useState(false)
-  const [adminCounts, setAdminCounts] = useState({ pendingProducts: 0, openReports: 0 })
+  const [adminCounts, setAdminCounts] = useState({ pendingProducts: 0, openReports: 0, adminNotifications: 0 })
   const mountedRef = useRef(true)
   const isAdmin = user && user.role === 'admin'
 
@@ -62,7 +62,17 @@ export default function Navbar(){
         const items = Array.isArray(data) ? data : (data.items || []);
         openReports = items.filter(r => String(r.status || 'open').toLowerCase() !== 'resolved' && String(r.status || 'open').toLowerCase() !== 'closed').length;
       }
-      if (mountedRef.current) setAdminCounts({ pendingProducts, openReports });
+      let adminNotifications = 0;
+      try {
+        const { db } = await import('../firebase');
+        const { collection, query, where, getDocs } = await import('firebase/firestore');
+        const q2 = query(collection(db, 'notifications'), where('forAdmin', '==', true), where('read', '==', false));
+        const snap2 = await getDocs(q2);
+        adminNotifications = snap2 ? snap2.size : 0;
+      } catch (e) {
+        adminNotifications = 0;
+      }
+      if (mountedRef.current) setAdminCounts({ pendingProducts, openReports, adminNotifications });
     } catch (err) {
       if (mountedRef.current) setAdminCounts(prev => prev);
     }
@@ -84,6 +94,13 @@ export default function Navbar(){
       fetchAdminCounts();
     }
   }, [notifOpen, isAdmin, fetchAdminCounts])
+
+  // Refresh admin counts when other parts of the app notify about changes
+  useEffect(() => {
+    function handler() { fetchAdminCounts(); }
+    window.addEventListener('admin-notifications-changed', handler);
+    return () => window.removeEventListener('admin-notifications-changed', handler);
+  }, [fetchAdminCounts]);
 
   useEffect(()=>{
     function onDoc(e){
@@ -136,7 +153,7 @@ export default function Navbar(){
   // Shopping bag icon removed from navbar per request
 
   const messageCount = Number.isFinite(totalUnread) ? totalUnread : 0;
-  const adminAlertCount = isAdmin ? (adminCounts.pendingProducts + adminCounts.openReports) : 0;
+  const adminAlertCount = isAdmin ? (adminCounts.pendingProducts + adminCounts.openReports + (adminCounts.adminNotifications || 0)) : 0;
   const combinedBadgeCount = messageCount + adminAlertCount;
   const badgeLabel = combinedBadgeCount > 99 ? '99+' : combinedBadgeCount;
 
@@ -235,7 +252,7 @@ export default function Navbar(){
           ) : (
             <>
               {/* Notifications bell next to profile (all logged-in users) */}
-              {user && (
+              {user && user.role !== 'admin' && (
                 <div className="relative" ref={notifRef}>
                   <button
                     onClick={(e)=>{

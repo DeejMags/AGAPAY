@@ -4,6 +4,67 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import { collection, addDoc, query, where, getDocs, getDoc, doc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import authFetch from './utils/authFetch';
 
+// Create an order document (user purchase/intent)
+export async function createOrder(orderData) {
+  try {
+    const user = auth.currentUser;
+    if (!user) throw new Error('User not authenticated');
+    const docRef = await addDoc(collection(db, 'orders'), {
+      productId: orderData.productId || null,
+      productTitle: orderData.productTitle || null,
+      sellerId: orderData.sellerId || null,
+      buyerId: orderData.buyerId || user.uid,
+      buyerName: orderData.buyerName || (user.displayName || user.email || ''),
+      type: orderData.type || 'delivery', // 'delivery' or 'pickup'
+      status: orderData.status || 'Pending',
+      createdAt: serverTimestamp(),
+      meta: orderData.meta || null
+    });
+    // Notify admin via in-app notifications collection so admins see it in the bell
+    try {
+      await addDoc(collection(db, 'notifications'), {
+        forAdmin: true,
+        message: `New ${orderData.type || 'delivery'} request for ${(orderData.productTitle || 'an item')}`,
+        title: `Order request: ${(orderData.productTitle || '').slice(0, 80)}`,
+        productId: orderData.productId || null,
+        orderId: docRef.id,
+        buyerId: user.uid,
+        sellerId: orderData.sellerId || null,
+        createdAt: serverTimestamp(),
+        read: false,
+      });
+    } catch (e) {
+      console.warn('Failed to create admin notification for order', e);
+    }
+    // Also call backend endpoint to create admin notification (fallback for security rules)
+    try {
+      await authFetch('/api/products/admin-notify-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: orderData.productId || null,
+          productTitle: orderData.productTitle || null,
+          buyerId: user.uid,
+          sellerId: orderData.sellerId || null,
+          type: orderData.type || 'delivery',
+        }),
+      });
+    } catch (e) {
+      // ignore backend notify failures
+    }
+    // Notify other UI about admin notifications change
+    try {
+      if (typeof window !== 'undefined' && window && window.dispatchEvent) {
+        window.dispatchEvent(new Event('admin-notifications-changed'));
+      }
+    } catch (e) {}
+    return { id: docRef.id, ...orderData };
+  } catch (err) {
+    console.error('Error creating order:', err);
+    throw err;
+  }
+}
+
 // Sellers: Post a product with image upload
 export async function postProduct(productData, imageFile) {
   try {

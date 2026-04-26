@@ -73,13 +73,12 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
         // Backfill missing profiles
         const ids = Array.from(new Set(mapped.map(x => x.otherId).filter(Boolean)));
         ids.forEach(async (oid) => {
-          if (profileCache[oid]) return;
           // backend first
           try {
             const res = await authFetch(`/api/users/${encodeURIComponent(oid)}`);
             if (res.ok) {
               const u = await res.json();
-              setProfileCache(prev => ({ ...prev, [oid]: u }));
+              setProfileCache(prev => (prev[oid] ? prev : ({ ...prev, [oid]: u })));
               return;
             }
           } catch {}
@@ -88,7 +87,7 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
             const { db } = await import('../firebase');
             const { doc, getDoc } = await import('firebase/firestore');
             const snap = await getDoc(doc(db, 'users', String(oid)));
-            if (snap.exists()) setProfileCache(prev => ({ ...prev, [oid]: { id: snap.id, ...snap.data() } }));
+            if (snap.exists()) setProfileCache(prev => (prev[oid] ? prev : ({ ...prev, [oid]: { id: snap.id, ...snap.data() } })));
           } catch {}
         });
       });
@@ -97,7 +96,7 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
     }
     return () => { if (unsub) unsub(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, meId]);
+  }, [open, meId, profileCache]);
 
   // Load personal in-app notifications from Firestore (e.g., product approved)
   useEffect(() => {
@@ -129,13 +128,12 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
         // Backfill admin profiles for notification authors (so avatar/name can be shown)
         const adminIds = Array.from(new Set(list.map(x => x.otherId).filter(Boolean)));
         adminIds.forEach(async (aid) => {
-          if (profileCache[aid]) return;
           // try backend first
           try {
             const res = await authFetch(`/api/users/${encodeURIComponent(aid)}`);
             if (res.ok) {
               const u = await res.json();
-              setProfileCache(prev => ({ ...prev, [aid]: u }));
+              setProfileCache(prev => (prev[aid] ? prev : ({ ...prev, [aid]: u })));
               return;
             }
           } catch {}
@@ -144,7 +142,7 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
             const { db } = await import('../firebase');
             const { doc, getDoc } = await import('firebase/firestore');
             const snap2 = await getDoc(doc(db, 'users', String(aid)));
-            if (snap2.exists()) setProfileCache(prev => ({ ...prev, [aid]: { id: snap2.id, ...snap2.data() } }));
+            if (snap2.exists()) setProfileCache(prev => (prev[aid] ? prev : ({ ...prev, [aid]: { id: snap2.id, ...snap2.data() } })));
           } catch {}
         });
       } catch (e) {

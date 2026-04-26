@@ -538,7 +538,7 @@ export default function ImpactReportPanel() {
       if (historyPollRef.current) { try { clearInterval(historyPollRef.current); } catch (e) {} }
       if (buyerHistoryPollRef.current) { try { clearInterval(buyerHistoryPollRef.current); } catch (e) {} }
     };
-  }, [attachRealtimeListener, attachUserPointsListener, attachHistoryListener, applyBadgeFromProfile]);
+  }, [attachRealtimeListener, attachUserPointsListener, attachHistoryListener, applyBadgeFromProfile, loadHistoryFromApi]);
 
   function isSoldStatus(status) {
     if (!status) return false;

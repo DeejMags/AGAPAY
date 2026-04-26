@@ -8,6 +8,7 @@ const firebaseCtrl = require('../controllers/productController');
 
 router.get('/', firebaseCtrl.getAllProducts);
 router.post('/', auth, upload.single('photo'), firebaseCtrl.createProduct);
+router.post('/admin-notify-order', auth, firebaseCtrl.notifyOrder);
 router.get('/:id', firebaseCtrl.getProductById);
 router.put('/:id', auth, upload.single('photo'), firebaseCtrl.updateProduct);
 router.post('/:id/mark-sold', auth, firebaseCtrl.markSold);
