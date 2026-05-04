@@ -40,6 +40,8 @@ export default function Marketplace(){
   const [sidebarMinPrice, setSidebarMinPrice] = useState('')
   const [sidebarMaxPrice, setSidebarMaxPrice] = useState('')
   const [sidebarRating, setSidebarRating] = useState('')
+  const [sidebarDelivery, setSidebarDelivery] = useState(false)
+  const [sidebarPickup, setSidebarPickup] = useState(false)
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +68,8 @@ export default function Marketplace(){
     fetchProducts();
     const onProductUpdated = () => { fetchProducts(); };
     window.addEventListener('product-updated', onProductUpdated);
-    return () => { cancelled = true; window.removeEventListener('product-updated', onProductUpdated); };
+    window.addEventListener('product-created', onProductUpdated);
+    return () => { cancelled = true; window.removeEventListener('product-updated', onProductUpdated); window.removeEventListener('product-created', onProductUpdated); };
   }, []);
 
   const filtered = useMemo(()=>{
@@ -91,6 +94,8 @@ export default function Marketplace(){
   // ...existing code...
       if(minPrice && Number(p.price) < Number(minPrice)) return false
       if(maxPrice && Number(p.price) > Number(maxPrice)) return false
+      if (sidebarDelivery && !p.delivery) return false
+      if (sidebarPickup && !p.pickup) return false
       return true
     })
 
@@ -109,7 +114,7 @@ export default function Marketplace(){
     }
 
     return res
-  },[products, searchQuery, category, minPrice, maxPrice, sortBy])
+  },[products, searchQuery, category, minPrice, maxPrice, sortBy, sidebarDelivery, sidebarPickup])
 
   // ...existing code...
 
@@ -166,6 +171,13 @@ export default function Marketplace(){
                   <option value="services">Services</option>
                   <option value="others">Others</option>
                 </select>
+              </div>
+              <div className="mb-3">
+                <label className="block text-sm mb-1">Fulfillment</label>
+                <div className="flex items-center gap-3">
+                  <label className="inline-flex items-center gap-2"><input type="checkbox" checked={sidebarDelivery} onChange={e=>setSidebarDelivery(e.target.checked)} /> Delivery</label>
+                  <label className="inline-flex items-center gap-2"><input type="checkbox" checked={sidebarPickup} onChange={e=>setSidebarPickup(e.target.checked)} /> Pickup</label>
+                </div>
               </div>
             </div>
           </aside>

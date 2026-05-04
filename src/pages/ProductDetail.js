@@ -224,6 +224,11 @@ export default function ProductDetail(){
       });
       // show modal instead of alert
       setNotifyModal({ open: true, type, title: product.title || product.name });
+      try {
+        const key = `agapay_selected_order_${product._id || product.id}`;
+        localStorage.setItem(key, type);
+      } catch (e) {}
+      setSelectedType(type);
       // Trigger reload for admin panels that poll for orders
       window.dispatchEvent(new Event('orders-changed'));
     } catch (e) {
@@ -233,6 +238,17 @@ export default function ProductDetail(){
   }
 
   const [notifyModal, setNotifyModal] = useState({ open: false, type: 'delivery', title: '' });
+
+  const [selectedType, setSelectedType] = useState(null);
+
+  useEffect(() => {
+    if (!product) return;
+    try {
+      const key = `agapay_selected_order_${product._id || product.id}`;
+      const v = localStorage.getItem(key);
+      if (v === 'delivery' || v === 'pickup') setSelectedType(v);
+    } catch (e) { }
+  }, [product]);
 
   if(loading) return <FullScreenLoader />
 
@@ -311,22 +327,38 @@ export default function ProductDetail(){
             View seller profile
           </button>
 
+          {selectedType && (
+            <div className="mb-3">
+              <div className="inline-flex items-center gap-2 px-3 py-2 bg-teal-50 border rounded text-sm text-teal-800">
+                <img src={selectedType === 'delivery' ? deliveryIcon : boxIcon} alt={selectedType} className="w-4 h-4" />
+                <span>You selected: {selectedType === 'delivery' ? 'Delivery' : 'Pickup'}</span>
+              </div>
+            </div>
+          )}
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <button onClick={() => handleOrder('delivery')} className="w-full p-2 bg-blue-600 text-white rounded inline-flex items-center justify-center">
-              <img src={deliveryIcon} alt="delivery" className="w-4 h-4 mr-2" />
-              <span>Delivery</span>
-            </button>
-            <button onClick={() => handleOrder('pickup')} className="w-full p-2 bg-green-600 text-white rounded inline-flex items-center justify-center">
-              <img src={boxIcon} alt="pickup" className="w-4 h-4 mr-2" />
-              <span>Pickup</span>
-            </button>
+            {product.delivery && (
+              <button onClick={() => handleOrder('delivery')} className="w-full p-2 bg-blue-600 text-white rounded inline-flex items-center justify-center">
+                <img src={deliveryIcon} alt="delivery" className="w-4 h-4 mr-2" />
+                <span>Delivery</span>
+              </button>
+            )}
+            {product.pickup && (
+              <button onClick={() => handleOrder('pickup')} className="w-full p-2 bg-green-600 text-white rounded inline-flex items-center justify-center">
+                <img src={boxIcon} alt="pickup" className="w-4 h-4 mr-2" />
+                <span>Pickup</span>
+              </button>
+            )}
           </div>
           {notifyModal.open && (
             <AdminNotifiedModal
               open={notifyModal.open}
               type={notifyModal.type}
               productTitle={notifyModal.title}
-              onClose={() => setNotifyModal({ open: false, type: 'delivery', title: '' })}
+              productDescription={product.desc || product.description || ''}
+              selectedType={notifyModal.type || selectedType}
+              supportsDelivery={!!product.delivery}
+              supportsPickup={!!product.pickup}
+              onClose={() => { setNotifyModal({ open: false, type: 'delivery', title: '' }); }}
             />
           )}
 

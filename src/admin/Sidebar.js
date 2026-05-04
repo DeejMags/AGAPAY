@@ -4,6 +4,7 @@ const navItems = [
   { key: 'users', label: 'Users', icon: '👥' },
   { key: 'products', label: 'Products', icon: '📦' },
   { key: 'orders', label: 'Orders', icon: '📮' },
+  { key: 'archive', label: 'Archived', icon: '🗄️' },
   { key: 'report', label: 'Report', icon: '❗' },
   { key: 'settings', label: 'Settings', icon: '⚙️' },
 ];

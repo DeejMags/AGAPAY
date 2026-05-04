@@ -1,5 +1,6 @@
 import React from 'react';
 import authFetch from '../utils/authFetch';
+import ConfirmModal from '../components/ConfirmModal';
 
 export default function Report() {
   const [items, setItems] = React.useState([]);
@@ -8,6 +9,10 @@ export default function Report() {
   const [lastUpdated, setLastUpdated] = React.useState(null);
   const [busyId, setBusyId] = React.useState(null);
   const [previewUrl, setPreviewUrl] = React.useState('');
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [confirmTarget, setConfirmTarget] = React.useState(null);
+  const [confirmLoading, setConfirmLoading] = React.useState(false);
+  const [confirmType, setConfirmType] = React.useState(null); // 'delete' | 'archive'
 
   async function load() {
     setLoading(true); setError('');
@@ -62,22 +67,42 @@ export default function Report() {
   }
  
 
-  async function handleDelete(id) {
+  function openConfirm(type, id) {
+    setConfirmType(type);
+    setConfirmTarget(id);
+    setConfirmOpen(true);
+  }
+
+  async function confirmAction() {
+    const id = confirmTarget;
+    const type = confirmType;
+    if (!id || !type) return setConfirmOpen(false);
+    setConfirmLoading(true);
     try {
-      if (!window.confirm('Delete this report? This action cannot be undone.')) return;
-      setBusyId(id);
-      const res = await authFetch(`/api/reports/${id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        const txt = await res.text().catch(()=> '');
-        throw new Error(txt || 'Delete failed');
+      if (type === 'delete') {
+        setBusyId(id);
+        const res = await authFetch(`/api/reports/${id}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const txt = await res.text().catch(()=> '');
+          throw new Error(txt || 'Delete failed');
+        }
+        setItems(prev => prev.filter(i => i.id !== id));
+        window.dispatchEvent(new Event('reports-changed'));
+      } else if (type === 'archive') {
+        // mark report as archived
+        setBusyId(id);
+        await setStatus(id, 'Archived');
+        // setStatus will reload and dispatch
+        try { window.dispatchEvent(new Event('navigate-archive')); } catch (_) {}
       }
-      setItems(prev => prev.filter(i => i.id !== id));
-      // notify dashboard to refresh badges/cards
-      window.dispatchEvent(new Event('reports-changed'));
     } catch (e) {
-      setError(e.message || 'Delete failed');
+      setError(e.message || (type === 'delete' ? 'Delete failed' : 'Archive failed'));
     } finally {
       setBusyId(null);
+      setConfirmLoading(false);
+      setConfirmOpen(false);
+      setConfirmTarget(null);
+      setConfirmType(null);
     }
   }
 
@@ -152,7 +177,8 @@ export default function Report() {
                             </button>
                           )}
                           <button className="px-2 py-1 bg-green-200 rounded disabled:opacity-50" disabled={busyId===m.id} onClick={()=>setStatus(m.id, 'resolved')}>Resolved</button>
-                          <button className="px-2 py-1 bg-red-600 text-white rounded disabled:opacity-50" disabled={busyId===m.id} onClick={()=>handleDelete(m.id)}>Delete</button>
+                            <button className="px-2 py-1 bg-gray-600 text-white rounded disabled:opacity-50" disabled={busyId===m.id} onClick={()=>openConfirm('archive', m.id)}>Archive</button>
+                            <button className="px-2 py-1 bg-red-600 text-white rounded disabled:opacity-50" disabled={busyId===m.id} onClick={()=>openConfirm('delete', m.id)}>Delete</button>
                         </>
                       )}
                     </td>
@@ -175,6 +201,21 @@ export default function Report() {
           </div>
         </div>
       )}
+      <ConfirmModal
+        open={confirmOpen}
+        title={confirmType === 'archive' ? 'Archive report' : 'Delete report'}
+        onCancel={() => { setConfirmOpen(false); setConfirmTarget(null); setConfirmType(null); }}
+        onConfirm={confirmAction}
+        confirmLabel={confirmType === 'archive' ? 'Archive' : 'Delete'}
+        confirmDanger={confirmType === 'archive'}
+        confirmLoading={confirmLoading}
+      >
+        {confirmType === 'archive' ? (
+          <div>Are you sure you want to archive this report? It will be kept for records and moved to Archive.</div>
+        ) : (
+          <div>Are you sure you want to delete this report? This action cannot be undone.</div>
+        )}
+      </ConfirmModal>
     </div>
   );
 }

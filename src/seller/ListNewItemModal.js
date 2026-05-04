@@ -5,7 +5,7 @@ import { postProduct as postProductViaService } from '../firebaseProductService'
 // removed unused import for missing asset
 
 export default function ListNewItemModal({ open, onClose, onAdd, editItem = null, onUpdate }) {
-  const [form, setForm] = useState({ title: '', description: '', category: '', price: '', location: '', locationLat: '', locationLng: '', images: [] });
+  const [form, setForm] = useState({ title: '', description: '', category: '', price: '', location: '', locationLat: '', locationLng: '', images: [], delivery: false, pickup: false });
   const categories = [
     'Clothing',
     'Electronics',
@@ -33,6 +33,8 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
         locationLat: (typeof editItem.locationLat === 'number' ? String(editItem.locationLat) : ''),
         locationLng: (typeof editItem.locationLng === 'number' ? String(editItem.locationLng) : ''),
         images: [],
+        delivery: !!editItem.delivery,
+        pickup: !!editItem.pickup,
       });
       // If existing image is available, show as preview
       const previews = [];
@@ -41,7 +43,7 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
       setImgPreview(previews);
     }
     if (open && !editItem) {
-      setForm({ title: '', description: '', category: '', price: '', location: '', locationLat: '', locationLng: '', images: [] });
+      setForm({ title: '', description: '', category: '', price: '', location: '', locationLat: '', locationLng: '', images: [], delivery: false, pickup: false });
       setImgPreview([]);
     }
   }, [open, editItem]);
@@ -49,6 +51,11 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
   function handleChange(e) {
     const { name, value } = e.target;
     setForm(f => ({ ...f, [name]: value }));
+  }
+
+  function handleCheckboxChange(e) {
+    const { name, checked } = e.target;
+    setForm(f => ({ ...f, [name]: checked }));
   }
 
   function handleImage(e) {
@@ -132,6 +139,8 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
         location: form.location || null,
         locationLat: form.locationLat ? Number(form.locationLat) : undefined,
         locationLng: form.locationLng ? Number(form.locationLng) : undefined,
+        delivery: !!form.delivery,
+        pickup: !!form.pickup,
       };
       // Persist to backend (JSON; backend will use provided imageUrl). Call onAdd only after persistence succeeds
       let createdObj = null;
@@ -177,7 +186,7 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
       }
     }
     setIsSaving(false);
-    setForm({ title: '', description: '', category: '', price: '', location: '', locationLat: '', locationLng: '', images: [] });
+    setForm({ title: '', description: '', category: '', price: '', location: '', locationLat: '', locationLng: '', images: [], delivery: false, pickup: false });
     setImgPreview([]);
     onClose();
   }
@@ -199,6 +208,10 @@ export default function ListNewItemModal({ open, onClose, onAdd, editItem = null
           </select>
           <input name="price" type="number" value={form.price} onChange={handleChange} placeholder="Price" className="border rounded p-2" required disabled={isSaving} />
           <input name="location" value={form.location} onChange={handleChange} placeholder="Location (e.g. Baguio City)" className="border rounded p-2" disabled={isSaving} />
+          <div className="flex items-center gap-4 mt-2 text-sm">
+            <label className="inline-flex items-center gap-2"><input type="checkbox" name="delivery" checked={!!form.delivery} onChange={handleCheckboxChange} /> Delivery</label>
+            <label className="inline-flex items-center gap-2"><input type="checkbox" name="pickup" checked={!!form.pickup} onChange={handleCheckboxChange} /> Pickup</label>
+          </div>
           <button
             type="button"
             className={`inline-flex items-center gap-2 px-3 py-1 border rounded text-sm ${isSaving || locating ? 'opacity-60 cursor-not-allowed bg-gray-50 text-gray-400' : 'bg-teal-50 text-teal-700 hover:bg-teal-100'}`}

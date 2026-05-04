@@ -286,6 +286,8 @@ exports.getAllProducts = async (req, res) => {
         price: parsePrice(data.price),
         category: data.category || '',
         sellerId: data.sellerId || data.owner || '',
+        delivery: !!data.delivery,
+        pickup: !!data.pickup,
         status: data.status || 'pending',
         imageUrl: publicImageUrl,
         imagePath: data.imagePath || null,
@@ -437,6 +439,8 @@ exports.createProduct = async (req, res) => {
       imageUrl,
       imagePath,
       location: data.location || null,
+      delivery: typeof data.delivery === 'boolean' ? data.delivery : false,
+      pickup: typeof data.pickup === 'boolean' ? data.pickup : false,
       createdAt,
     };
 
@@ -457,6 +461,8 @@ exports.createProduct = async (req, res) => {
       price: parsePrice(createdData.price),
       category: createdData.category || '',
       sellerId: createdData.sellerId || '',
+      delivery: !!createdData.delivery,
+      pickup: !!createdData.pickup,
       status: createdData.status || 'pending',
       imageUrl: createdImageUrl,
       imagePath: createdData.imagePath || null,
@@ -537,6 +543,8 @@ exports.getProductById = async (req, res) => {
       title: d.title || d.name || '',
       description: d.description || d.desc || '',
       price: parsePrice(d.price),
+      delivery: !!d.delivery,
+      pickup: !!d.pickup,
       category: d.category || '',
       sellerId: d.sellerId || '',
       sellerName: d.sellerName || d.seller || '',
@@ -563,6 +571,10 @@ exports.updateProduct = async (req, res) => {
 
     const updates = { ...data, updatedAt: admin.firestore.FieldValue.serverTimestamp() };
     if (normalizedStatus) updates.status = normalizedStatus;
+    
+    // Ensure delivery and pickup are boolean if provided
+    if (typeof data.delivery === 'boolean') updates.delivery = data.delivery;
+    if (typeof data.pickup === 'boolean') updates.pickup = data.pickup;
 
     if (updates.status === 'active') {
       updates.publishedAt = admin.firestore.FieldValue.serverTimestamp();
@@ -688,6 +700,8 @@ exports.updateProduct = async (req, res) => {
       title: pd.title || pd.name || '',
       description: pd.description || pd.desc || '',
       price: parsePrice(pd.price),
+      delivery: !!pd.delivery,
+      pickup: !!pd.pickup,
       status: pd.status || 'pending',
       category: pd.category || '',
       location: pd.location || null,

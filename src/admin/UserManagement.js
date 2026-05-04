@@ -195,6 +195,7 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
       setUsers(prev => prev.map(applyArchived));
       if (setParentUsers) setParentUsers(prev => prev.map(applyArchived));
       setNotifyText('User archived'); setNotifySuccess(true); setNotifyOpen(true);
+      try { window.dispatchEvent(new Event('navigate-archive')); } catch (_) {}
     } else {
       setNotifyText('Failed to archive user'); setNotifySuccess(false); setNotifyOpen(true);
     }

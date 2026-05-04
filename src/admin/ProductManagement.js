@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import authFetch from '../utils/authFetch';
 import { getAllProducts } from '../firebaseProductService';
 import DenyModal from '../components/DenyModal';
+import ConfirmModal from '../components/ConfirmModal';
 export default function ProductManagement({ products: parentProducts = null, setProducts: setParentProducts }) {
   const [search, setSearch] = useState('');
   // Normalize parentProducts: it may be an array or a paged object { items: [] }
@@ -127,6 +128,47 @@ export default function ProductManagement({ products: parentProducts = null, set
     if (setParentProducts) setParentProducts(prev => prev.filter(p => p.id !== stringId && p._id !== stringId));
     try { window.dispatchEvent(new CustomEvent('product-updated', { detail: { id: stringId, action: 'delete' } })); } catch(e){}
   }
+
+  // Archive modal state
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState(null);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [archiveReason, setArchiveReason] = useState('');
+
+  function openArchive(id) {
+    setArchiveTarget(id);
+    setArchiveReason('');
+    setArchiveOpen(true);
+  }
+
+  async function confirmArchive() {
+    const id = archiveTarget;
+    if (!id) return setArchiveOpen(false);
+    setArchiveLoading(true);
+    try {
+      try {
+        const res = await authFetch(`/api/products/${id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'Archived', archiveReason: archiveReason || null })
+        });
+        if (!res.ok) throw new Error('Backend archive failed');
+        const updated = await res.json();
+        setProducts(prev => prev.map(p => (p.id === id || p._id === id) ? { ...p, ...updated } : p));
+        if (setParentProducts) setParentProducts(prev => prev.map(p => (p.id === id || p._id === id) ? { ...p, ...updated } : p));
+      } catch (err) {
+        // Fallback: mark locally as archived
+        setProducts(prev => prev.map(p => (p.id === id || p._id === id) ? { ...p, status: 'Archived', archiveReason: archiveReason || '' } : p));
+        if (setParentProducts) setParentProducts(prev => prev.map(p => (p.id === id || p._id === id) ? { ...p, status: 'Archived', archiveReason: archiveReason || '' } : p));
+      }
+      try { window.dispatchEvent(new CustomEvent('product-updated', { detail: { id, action: 'archive' } })); } catch(e){}
+      // navigate to Archive tab
+      try { window.dispatchEvent(new Event('navigate-archive')); } catch(_){}
+    } finally {
+      setArchiveLoading(false);
+      setArchiveOpen(false);
+      setArchiveTarget(null);
+      setArchiveReason('');
+    }
+  }
   function refresh() {
     // Actively fetch from backend and update state
     setLoading(true);
@@ -220,6 +262,7 @@ export default function ProductManagement({ products: parentProducts = null, set
                         )}
                         {/* Admin does not mark items as sold here; status is display-only per request */}
                         <button className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition" onClick={()=>handleDelete(p.id || p._id)}>Delete</button>
+                        <button className="px-3 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 transition" onClick={()=>openArchive(p.id || p._id)}>Archive</button>
                       </>
                     )}
                   </td>
@@ -235,6 +278,21 @@ export default function ProductManagement({ products: parentProducts = null, set
         initialReason={denyInitialReason}
         onSubmit={(reason) => submitDeny(reason)}
       />
+      <ConfirmModal
+        open={archiveOpen}
+        title="Archive product"
+        onCancel={() => { setArchiveOpen(false); setArchiveTarget(null); setArchiveReason(''); }}
+        onConfirm={confirmArchive}
+        confirmLabel="Archive"
+        confirmDanger={true}
+        confirmLoading={archiveLoading}
+      >
+        <div className="mb-2">You are about to archive this product. It will be hidden from default listings but retained for records.</div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Reason (optional)</label>
+          <textarea value={archiveReason} onChange={e=>setArchiveReason(e.target.value)} className="w-full border rounded p-2 mt-1" rows={3} />
+        </div>
+      </ConfirmModal>
     </div>
   );
 }

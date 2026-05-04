@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import Sidebar from './Sidebar';
+import FullScreenLoader from '../components/FullScreenLoader';
 import DashboardOverview from './DashboardOverview';
 import UserManagement from './UserManagement';
 import ProductManagement from './ProductManagement';
 import OrdersManagement from './OrdersManagement';
 import Report from './Report';
+import ArchivePage from './ArchivePage';
 import authFetch from '../utils/authFetch';
 import PointsRewards from './PointsRewards';
 import Notifications from './Notifications';
@@ -21,12 +23,14 @@ const initialPoints = [];
 
 export default function AdminDashboard() {
   const [activePage, setActivePage] = useState('dashboard');
+  const [pageLoading, setPageLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
-  const validPages = React.useMemo(() => new Set(['dashboard', 'users', 'products', 'orders', 'report', 'points', 'notifications', 'settings']), []);
+  const validPages = React.useMemo(() => new Set(['dashboard', 'users', 'products', 'orders', 'archive', 'report', 'points', 'notifications', 'settings']), []);
   const lastSectionRef = React.useRef(null);
   const [users, setUsers] = useState(initialUsers);
   const [products, setProducts] = useState([]);
+  const [orders, setOrders] = useState(initialOrders);
   React.useEffect(() => {
     async function loadProducts() {
       try {
@@ -79,21 +83,21 @@ export default function AdminDashboard() {
     loadUsers();
   }, []);
 
-  React.useEffect(() => {
-    async function loadOrders() {
-      try {
-        const qs = await getDocs(collection(db, 'orders'));
-        const list = qs.docs.map(d => ({ id: d.id, ...d.data() }));
-        // sort newest first
-        list.sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-        setOrders(list);
-      } catch (err) {
-        console.error('Error loading orders from Firestore:', err);
-        setOrders([]);
-      }
+  const loadOrders = React.useCallback(async () => {
+    try {
+      const qs = await getDocs(collection(db, 'orders'));
+      const list = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+      // sort newest first
+      list.sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      setOrders(list);
+    } catch (err) {
+      console.error('Error loading orders from Firestore:', err);
+      setOrders([]);
     }
-    loadOrders();
+  }, []);
 
+  React.useEffect(() => {
+    loadOrders();
     const onChanged = () => loadOrders();
     window.addEventListener('orders-changed', onChanged);
     const id = window.setInterval(loadOrders, 30000);
@@ -101,8 +105,38 @@ export default function AdminDashboard() {
       window.removeEventListener('orders-changed', onChanged);
       window.clearInterval(id);
     };
-  }, []);
-  const [orders, setOrders] = useState(initialOrders);
+  }, [loadOrders]);
+
+  const refreshOrders = React.useCallback(async () => {
+    try {
+      setPageLoading(true);
+      await loadOrders();
+    } catch (e) {
+      // ignore
+    } finally {
+      setPageLoading(false);
+    }
+  }, [loadOrders]);
+
+  // When active page changes, ensure page loading state clears when data is ready
+  React.useEffect(() => {
+    let cancelled = false;
+    async function onPageChange() {
+      // If switching to orders/archive, reload orders and clear loading afterwards
+      if (activePage === 'orders' || activePage === 'archive') {
+        try {
+          await loadOrders();
+        } catch (e) {}
+        if (!cancelled) setPageLoading(false);
+        return;
+      }
+      // For other pages, hide the loading overlay shortly
+      const t = window.setTimeout(() => { if (!cancelled) setPageLoading(false); }, 350);
+      return () => window.clearTimeout(t);
+    }
+    const cleanup = onPageChange();
+    return () => { cancelled = true; if (cleanup && typeof cleanup.then !== 'function') cleanup(); };
+  }, [activePage, loadOrders]);
   const lastSeenOrderIdRef = React.useRef(null);
   const [orderPopup, setOrderPopup] = useState({ open: false, order: null });
   React.useEffect(() => {
@@ -169,6 +203,16 @@ export default function AdminDashboard() {
     }
   }, [activePage, loadReports]);
 
+  // Listen for navigation events to open the Archive tab when items are archived
+  React.useEffect(() => {
+    function handleNavigateArchive() {
+      setPageLoading(true);
+      setActivePage('archive');
+    }
+    window.addEventListener('navigate-archive', handleNavigateArchive);
+    return () => window.removeEventListener('navigate-archive', handleNavigateArchive);
+  }, []);
+
   React.useEffect(() => {
     const stateSection = location && location.state && location.state.adminSection;
     const params = location ? new URLSearchParams(location.search || '') : null;
@@ -204,7 +248,19 @@ export default function AdminDashboard() {
       case 'products':
         return <ProductManagement products={products} setProducts={setProducts} />;
       case 'orders':
-        return <OrdersManagement orders={orders} setOrders={setOrders} />;
+        return <OrdersManagement orders={orders} setOrders={setOrders} onRefresh={refreshOrders} />;
+      case 'archive':
+        return (
+          <ArchivePage
+            orders={orders}
+            setOrders={setOrders}
+            users={users}
+            setUsers={setUsers}
+            reports={reportItems}
+            setReports={setReportItems}
+            refreshOrders={refreshOrders}
+          />
+        );
       case 'report':
         return <Report />;
       case 'points':
@@ -250,7 +306,7 @@ export default function AdminDashboard() {
       )}
 
       <div className="hidden lg:block">
-        <Sidebar activePage={activePage} setActivePage={setActivePage} className="h-screen sticky top-0" />
+        <Sidebar activePage={activePage} setActivePage={(k)=>{ setPageLoading(true); setActivePage(k); }} className="h-screen sticky top-0" />
       </div>
 
       {sidebarOpen && (
@@ -268,13 +324,14 @@ export default function AdminDashboard() {
                 ✕
               </button>
             </div>
-            <Sidebar activePage={activePage} setActivePage={(k)=>{ setActivePage(k); setSidebarOpen(false); }} className="h-[calc(100%-48px)] overflow-y-auto" />
+            <Sidebar activePage={activePage} setActivePage={(k)=>{ setPageLoading(true); setActivePage(k); setSidebarOpen(false); }} className="h-[calc(100%-48px)] overflow-y-auto" />
           </div>
         </div>
       )}
 
       <div className="flex-1 flex flex-col w-full">
         <main className="flex-1 p-3 sm:p-4 md:p-6">
+          {pageLoading && <FullScreenLoader />}
           {renderPage()}
         </main>
       </div>
