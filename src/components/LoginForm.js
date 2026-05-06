@@ -1,48 +1,7 @@
 import React, { useState } from 'react'
 import { auth } from '../firebase';
-
-function mapAuthError(err) {
-  const code = err && err.code ? String(err.code) : '';
-  switch (code) {
-    case 'auth/invalid-credential':
-      return 'Invalid email or password. Please try again.';
-    case 'auth/invalid-email':
-      return 'Please enter a valid email address.';
-    case 'auth/user-not-found':
-      return 'No account found with that email.';
-    case 'auth/wrong-password':
-      return 'Incorrect password. Try again or reset it.';
-    case 'auth/user-disabled':
-      return 'This account has been disabled. Please contact support.';
-    case 'auth/too-many-requests':
-      return 'Too many attempts. Please wait a moment and try again.';
-    case 'auth/network-request-failed':
-      return 'Network error. Check your internet connection and try again.';
-    case 'auth/popup-blocked':
-      return 'Popup blocked by your browser. Allow popups and try again.';
-    case 'auth/popup-closed-by-user':
-      return 'Google sign-in was closed before completing.';
-    case 'auth/operation-not-allowed':
-      return 'This sign-in method is not enabled. Please contact support.';
-    default:
-      return 'Login failed. Please try again.';
-  }
-}
-
-function getBanReason(source) {
-  if (!source) return '';
-  // If it's an Error-like object
-  if (typeof source === 'string') return source;
-  if (source.message) return String(source.message);
-  // Common backend field names for ban/reason
-  const fields = ['banReason','reason','ban_reason','ban_reason_description','description','message','disabledReason','statusMessage','note','status_reason','banReasonText'];
-  for (const f of fields) {
-    if (source[f]) return String(source[f]);
-  }
-  // If profile contains a status that explains ban, include it
-  if (source.status && String(source.status).toLowerCase().includes('ban')) return String(source.status);
-  return '';
-}
+import { loginWithEmail, signInWithGoogle, mapAuthError, isUserBanned, getBanReason } from '../utils/firebaseAuthService';
+import { signOut } from 'firebase/auth';
 
 export default function LoginForm({ onSuccess }){
   const [bannedOpen, setBannedOpen] = useState(false);
@@ -54,58 +13,38 @@ export default function LoginForm({ onSuccess }){
     setBannedMsg(full);
     setBannedOpen(true);
   }
+
   // Google Login handler
   async function handleGoogleLogin(e) {
     e.preventDefault();
     try {
-      const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-      // Request backend profile (create if missing)
-      try {
-        const r = await fetch('/api/auth/google', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: user.email, name: user.displayName, uid: user.uid }) });
-        if (!r.ok) throw new Error('Failed to fetch/create profile');
-        const profile = await r.json();
-        // Banned guard from backend profile
-        const pStatus = String(profile.status || '').toLowerCase();
-        const pBanned = profile.banned === true || pStatus === 'banned' || pStatus.includes('ban') || (profile.active === false && pStatus !== 'active');
-        if (pBanned) {
-          try { await auth.signOut(); } catch {}
-          try { localStorage.removeItem('user'); localStorage.removeItem('token'); } catch {}
-          const reason = getBanReason(profile) || profile.banReason || profile.reason || '';
-          openBannedModal('Your account is banned and cannot log in.', reason);
-          return;
-        }
-        const isAdmin = user.email === 'admin@agapay.com' || user.email === 'admin@gmail.com';
-        const finalProfile = { id: profile.id || user.uid, username: profile.username || user.displayName, email: user.email, role: isAdmin ? 'admin' : profile.role || 'user' };
-        localStorage.setItem('user', JSON.stringify(finalProfile));
-        localStorage.setItem('token', user.uid);
-        if (finalProfile.role === 'admin') window.location.href = '/admin';
-        else if (onSuccess) onSuccess(finalProfile);
-      } catch (err) {
-        console.warn('Google login backend profile failed', err);
-        setError('User does not exist. Please sign up first.');
-        return;
+      const { user, profile, isAdmin } = await signInWithGoogle();
+      
+      // Store profile and auth token
+      localStorage.setItem('user', JSON.stringify({
+        id: profile.id,
+        username: profile.username,
+        email: profile.email,
+        phone: profile.phone || '',
+        profilePic: user.photoURL || '',
+        role: profile.role,
+      }));
+      localStorage.setItem('token', user.uid);
+      
+      // Redirect admins
+      if (isAdmin) {
+        window.location.href = '/admin';
+      } else if (onSuccess) {
+        onSuccess(profile);
       }
-      } catch (err) {
-        if (err && err.code === 'auth/user-disabled') {
-          let reason = getBanReason(err) || '';
-          const emailFromErr = (err && (err.email || (err.customData && err.customData.email))) || '';
-          if (emailFromErr) {
-            try {
-              const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: emailFromErr }) });
-              if (r.ok) {
-                const profile = await r.json();
-                reason = getBanReason(profile) || profile.banReason || profile.reason || reason;
-              }
-            } catch (e) {}
-          }
-          openBannedModal('Your account is banned and cannot log in.', reason);
-        } else {
-          setError(mapAuthError(err));
-        }
+    } catch (err) {
+      const errorMsg = err.message || mapAuthError(err);
+      if (errorMsg.includes('banned')) {
+        openBannedModal(errorMsg);
+      } else {
+        setError(errorMsg);
       }
+    }
   }
   const [email,setEmail] = useState('')
   const [password,setPassword] = useState('')
@@ -125,51 +64,32 @@ export default function LoginForm({ onSuccess }){
     setError('');
     if (!validateAll()) return;
     try {
-      const { signInWithEmailAndPassword } = await import('firebase/auth');
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      // After client signs in, fetch authoritative profile from backend
-      try {
-        const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
-        if (!r.ok) {
-          const j = await r.json().catch(()=>({ error: 'Profile fetch failed' }));
-          setError(j.error || 'No account with that email');
-          return;
-        }
-        const profile = await r.json();
-        // Banned guard from backend profile
-        const pStatus = String(profile.status || '').toLowerCase();
-        const pBanned = profile.banned === true || pStatus === 'banned' || pStatus.includes('ban') || (profile.active === false && pStatus !== 'active');
-        if (pBanned) {
-          try { await auth.signOut(); } catch {}
-          try { localStorage.removeItem('user'); localStorage.removeItem('token'); } catch {}
-          const reason = getBanReason(profile) || profile.banReason || profile.reason || '';
-          openBannedModal('Your account is banned and cannot log in.', reason);
-          return;
-        }
-        localStorage.setItem('token', user.uid);
-        localStorage.setItem('user', JSON.stringify(profile));
-        if (profile.role === 'admin' || profile.email === 'admin@agapay.com' || profile.email === 'admin@gmail.com') {
-          window.location.href = '/admin';
-        } else if (onSuccess) onSuccess(profile);
-      } catch (err) {
-        console.warn('Failed to fetch backend profile after signin', err);
-        setError('No account with that email');
-        return;
+      const { user, profile, isAdmin } = await loginWithEmail(email, password);
+      
+      // Store profile and auth token
+      localStorage.setItem('token', user.uid);
+      localStorage.setItem('user', JSON.stringify({
+        id: profile.id,
+        username: profile.username,
+        email: profile.email,
+        phone: profile.phone || '',
+        profilePic: user.photoURL || '',
+        role: profile.role,
+      }));
+      
+      // Redirect admins
+      if (isAdmin) {
+        window.location.href = '/admin';
+      } else if (onSuccess) {
+        onSuccess(profile);
       }
     } catch (err) {
-      if (err && err.code === 'auth/user-disabled') {
-        let reason = getBanReason(err) || '';
-        try {
-          const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
-          if (r.ok) {
-            const profile = await r.json();
-            reason = getBanReason(profile) || profile.banReason || profile.reason || reason;
-          }
-        } catch (e) {}
-        openBannedModal('Your account is banned and cannot log in.', reason);
+      console.error('Login error:', err);
+      const errorMsg = err.message || mapAuthError(err);
+      if (errorMsg.includes('banned')) {
+        openBannedModal(errorMsg);
       } else {
-        setError(mapAuthError(err));
+        setError(errorMsg);
       }
     }
   }

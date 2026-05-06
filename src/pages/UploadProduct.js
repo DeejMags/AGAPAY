@@ -59,33 +59,31 @@ export default function UploadProduct(){
   }
 
   return (
-    <div className="py-8 container mx-auto px-4 max-w-lg">
-      <h1 className="text-2xl font-bold">Upload Product</h1>
-      <form onSubmit={submit} className="mt-4 flex flex-col gap-3">
-  <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Title" className="p-2 border rounded" required />
-  {errors.title && <div className="text-red-500 text-sm">{errors.title}</div>}
-  <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Description" className="p-2 border rounded" />
-  <input value={price} onChange={e=>setPrice(e.target.value)} placeholder="Price" className="p-2 border rounded" required />
-  {errors.price && <div className="text-red-500 text-sm">{errors.price}</div>}
-        <select value={category} onChange={e=>setCategory(e.target.value)} className="p-2 border rounded">
+    <div className="py-6 sm:py-8 container mx-auto px-3 sm:px-4 max-w-lg">
+      <h1 className="text-2xl sm:text-3xl font-bold">Upload Product</h1>
+      <form onSubmit={submit} className="mt-4 sm:mt-6 flex flex-col gap-3 sm:gap-4">
+  <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Title" className="p-3 sm:p-2 border rounded text-base min-h-[44px] sm:min-h-auto" required />
+  {errors.title && <div className="text-red-500 text-xs sm:text-sm">{errors.title}</div>}
+  <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Description" className="p-3 sm:p-2 border rounded text-base min-h-[120px]" />
+  <input value={price} onChange={e=>setPrice(e.target.value)} placeholder="Price" type="number" step="0.01" className="p-3 sm:p-2 border rounded text-base min-h-[44px] sm:min-h-auto" required />
+  {errors.price && <div className="text-red-500 text-xs sm:text-sm">{errors.price}</div>}
+        <select value={category} onChange={e=>setCategory(e.target.value)} className="p-3 sm:p-2 border rounded text-base min-h-[44px] sm:min-h-auto">
           <option value="">Select category</option>
           <option value="electronics">Electronics</option>
           <option value="furniture">Furniture</option>
-          
           <option value="shirt">Shirt</option>
           <option value="sports">Sports</option>
         </select>
-  
 
-        <label className="text-sm">Product Image</label>
-  <input type="file" accept="image/*" onChange={onFileChange} required />
-  {errors.image && <div className="text-red-500 text-sm">{errors.image}</div>}
+        <label className="text-sm sm:text-base font-medium">Product Image</label>
+  <input type="file" accept="image/*" onChange={onFileChange} className="p-2 border rounded" required />
+  {errors.image && <div className="text-red-500 text-xs sm:text-sm">{errors.image}</div>}
         {preview && (
-          <div className="mt-2">
-            <img src={preview} alt="preview" className="w-32 h-32 object-cover rounded border" />
+          <div className="mt-3 sm:mt-4">
+            <img src={preview} alt="preview" className="w-32 h-32 sm:w-40 sm:h-40 object-cover rounded border" />
           </div>
         )}
-        <button disabled={saving} className="p-2 bg-teal-600 text-white rounded">{saving ? 'Saving...' : 'Upload'}</button>
+        <button disabled={saving} className="p-3 sm:p-2 bg-teal-600 text-white rounded font-semibold min-h-[44px] sm:min-h-auto text-base hover:bg-teal-700 active:bg-teal-800 transition">{saving ? 'Saving...' : 'Upload'}</button>
       </form>
     </div>
   )

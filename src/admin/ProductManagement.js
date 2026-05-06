@@ -129,6 +129,11 @@ export default function ProductManagement({ products: parentProducts = null, set
     try { window.dispatchEvent(new CustomEvent('product-updated', { detail: { id: stringId, action: 'delete' } })); } catch(e){}
   }
 
+  // Delete confirmation state
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
   // Archive modal state
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState(null);
@@ -139,6 +144,27 @@ export default function ProductManagement({ products: parentProducts = null, set
     setArchiveTarget(id);
     setArchiveReason('');
     setArchiveOpen(true);
+  }
+
+  function openDeleteConfirm(id) {
+    setDeleteTarget(id);
+    setDeleteConfirmOpen(true);
+  }
+
+  async function confirmDelete() {
+    const id = deleteTarget;
+    if (!id) return setDeleteConfirmOpen(false);
+    setDeleteLoading(true);
+    try {
+      await handleDelete(id);
+    } catch (err) {
+      console.error('Delete failed:', err);
+      alert('Failed to delete product');
+    } finally {
+      setDeleteLoading(false);
+      setDeleteConfirmOpen(false);
+      setDeleteTarget(null);
+    }
   }
 
   async function confirmArchive() {
@@ -248,9 +274,12 @@ export default function ProductManagement({ products: parentProducts = null, set
                   <td className="p-3">{p.sellerName || p.sellerDisplayName || (p.sellerEmail ? String(p.sellerEmail).split('@')[0] : '') || p.sellerId || 'Unknown'}</td>
                   <td className="p-3 text-xs">{p.location ? p.location : ((p.locationLat !== undefined && p.locationLng !== undefined && p.locationLat !== null && p.locationLng !== null) ? `${(Number(p.locationLat)).toFixed ? Number(p.locationLat).toFixed(4) : p.locationLat}, ${(Number(p.locationLng)).toFixed ? Number(p.locationLng).toFixed(4) : p.locationLng}` : '—')}</td>
                   <td className="p-3 flex gap-2 flex-wrap">
-                    {/* If item is sold, do not render any action buttons */}
+                    {/* If item is sold, show delete and archive buttons */}
                     {((p.status || '').toString().toLowerCase() === 'sold') ? (
-                      <span className="text-gray-400">No actions</span>
+                      <>
+                        <button className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition" onClick={()=>openDeleteConfirm(p.id || p._id)}>Delete</button>
+                        <button className="px-3 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 transition" onClick={()=>openArchive(p.id || p._id)}>Archive</button>
+                      </>
                     ) : (
                       <>
                         {/* Show Approve/Deny for items that are not already active */}
@@ -261,7 +290,7 @@ export default function ProductManagement({ products: parentProducts = null, set
                           </>
                         )}
                         {/* Admin does not mark items as sold here; status is display-only per request */}
-                        <button className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition" onClick={()=>handleDelete(p.id || p._id)}>Delete</button>
+                        <button className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition" onClick={()=>openDeleteConfirm(p.id || p._id)}>Delete</button>
                         <button className="px-3 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 transition" onClick={()=>openArchive(p.id || p._id)}>Archive</button>
                       </>
                     )}
@@ -291,6 +320,20 @@ export default function ProductManagement({ products: parentProducts = null, set
         <div>
           <label className="block text-sm font-medium text-gray-700">Reason (optional)</label>
           <textarea value={archiveReason} onChange={e=>setArchiveReason(e.target.value)} className="w-full border rounded p-2 mt-1" rows={3} />
+        </div>
+      </ConfirmModal>
+      <ConfirmModal
+        open={deleteConfirmOpen}
+        title="Delete product"
+        onCancel={() => { setDeleteConfirmOpen(false); setDeleteTarget(null); }}
+        onConfirm={confirmDelete}
+        confirmLabel="Delete"
+        confirmDanger={true}
+        confirmLoading={deleteLoading}
+      >
+        <div className="text-sm text-gray-700">
+          <p>Are you sure you want to permanently delete this product? This action cannot be undone.</p>
+          <p className="mt-2 text-red-600 font-medium">This will remove the product from the system entirely.</p>
         </div>
       </ConfirmModal>
     </div>

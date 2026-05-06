@@ -63,9 +63,11 @@ export default function ProductCard({ product, index }) {
             </span>
           )}
           {product.pickup && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 text-xs rounded">
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
-              Pickup
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-teal-600 text-xs rounded">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73L13 3 4 6.27A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73L11 21l9-3.27A2 2 0 0 0 21 16z" stroke-width="1.5"/>
+        <path d="M3.27 6.96L12 10l8.73-3.04" stroke-width="1.2"/>
+</svg>              Pickup
             </span>
           )}
         </div>
@@ -94,5 +96,4 @@ export default function ProductCard({ product, index }) {
     </div>
   </a>
   );
-// ...existing code...
 }

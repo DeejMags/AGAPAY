@@ -24,7 +24,6 @@ function App(){
     <BrowserRouter>
       <Navbar />
       <div className="min-h-screen flex flex-col">
-        {/* Make route content full-width so admin and seller dashboards fit the window */}
         <div className="flex-1 w-full px-3 sm:px-4">
           <Routes>
             <Route path="/" element={<Landing/>} />
@@ -37,7 +36,6 @@ function App(){
             <Route path="/login" element={<Login/>} />
             <Route path="/signup" element={<Signup/>} />
             <Route path="/admin" element={<ProtectedRoute><AdminDashboard/></ProtectedRoute>} />
-            {/* Shopping bag removed */}
             <Route path="/listings" element={<ProtectedRoute><Listings/></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><SellerDashboard/></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><UserSettings/></ProtectedRoute>} />

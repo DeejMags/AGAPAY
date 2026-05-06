@@ -264,10 +264,16 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
     setConfirmOpen(true);
   }
 
-  function openDeleteConfirm(id) {
+  function openArchiveConfirm(id) {
     setConfirmMode('archive');
     setConfirmTarget(id);
     setArchiveReason('');
+    setConfirmOpen(true);
+  }
+
+  function openPermanentDeleteConfirm(id) {
+    setConfirmMode('permanentDelete');
+    setConfirmTarget(id);
     setConfirmOpen(true);
   }
 
@@ -375,9 +381,15 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
                               </button>
                               <button
                                 className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition"
-                                onClick={() => openDeleteConfirm(u.id)}
+                                onClick={() => openArchiveConfirm(u.id)}
                                 aria-label={`Archive ${getDisplayName(u) || u.id}`}>
                                 Archive
+                              </button>
+                              <button
+                                className="px-2 py-1 bg-orange-600 text-white rounded hover:bg-orange-700 transition"
+                                onClick={() => openPermanentDeleteConfirm(u.id)}
+                                aria-label={`Permanently delete ${getDisplayName(u) || u.id}`}>
+                                Delete
                               </button>
                             </>
                           );
@@ -392,9 +404,15 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
                             </button>
                             <button
                               className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition"
-                              onClick={() => openDeleteConfirm(u.id)}
+                              onClick={() => openArchiveConfirm(u.id)}
                               aria-label={`Archive ${getDisplayName(u) || u.id}`}>
                               Archive
+                            </button>
+                            <button
+                              className="px-2 py-1 bg-orange-600 text-white rounded hover:bg-orange-700 transition"
+                              onClick={() => openPermanentDeleteConfirm(u.id)}
+                              aria-label={`Permanently delete ${getDisplayName(u) || u.id}`}>
+                              Delete
                             </button>
                           </>
                         );
@@ -411,7 +429,7 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
       {/* Ban confirmation modal */}
       <Modal
         open={confirmOpen && !!confirmTarget}
-        title={confirmMode === 'archive' ? 'Confirm archive' : (confirmMode === 'unban' ? 'Confirm unban' : 'Confirm ban')}
+        title={confirmMode === 'archive' ? 'Confirm archive' : (confirmMode === 'permanentDelete' ? 'Confirm permanent delete' : (confirmMode === 'unban' ? 'Confirm unban' : 'Confirm ban'))}
       onCancel={() => { setConfirmOpen(false); setConfirmTarget(null); setConfirmMode(null); setBanReason(''); setArchiveReason(''); }}
         onConfirm={async () => {
           const id = confirmTarget;
@@ -428,6 +446,8 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
               await handleBan(id)(banReason || 'Banned by admin');
             } else if (mode === 'archive') {
               await handleArchive(id, archiveReason || null);
+            } else if (mode === 'permanentDelete') {
+              await handleDelete(id);
             } else if (mode === 'unban') {
               await handleUnban(id);
             }
@@ -435,13 +455,28 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
             setConfirmLoading(false);
           }
         }}
-        confirmLabel={confirmMode === 'archive' ? 'Archive user' : (confirmMode === 'unban' ? 'Unban user' : 'Ban user')}
-        confirmDanger={confirmMode === 'archive'}
+        confirmLabel={confirmMode === 'archive' ? 'Archive user' : (confirmMode === 'permanentDelete' ? 'Delete permanently' : (confirmMode === 'unban' ? 'Unban user' : 'Ban user'))}
+        confirmDanger={confirmMode === 'archive' || confirmMode === 'permanentDelete'}
         confirmLoading={confirmLoading}
       >
         {(() => {
           const targetUser = users.find(x => x.id === confirmTarget) || {};
           const displayName = targetUser.username || targetUser.name || targetUser.email || confirmTarget;
+          if (confirmMode === 'permanentDelete') {
+            return (
+              <div>
+                <div className="mb-3 text-red-600 font-semibold">⚠️ Warning: This action cannot be undone</div>
+                <div className="mb-2">You are about to <strong>permanently delete</strong> the account of <strong>{displayName}</strong>.</div>
+                <div className="text-sm text-gray-600">This will remove:</div>
+                <ul className="text-sm text-gray-600 list-disc ml-4 mt-1">
+                  <li>User profile and account data</li>
+                  <li>All associated messages and conversations</li>
+                  <li>Product listings and reviews</li>
+                </ul>
+                <div className="text-sm text-gray-600 mt-2">This action <strong>cannot be recovered</strong>.</div>
+              </div>
+            );
+          }
           if (confirmMode === 'archive') {
             return (
               <>

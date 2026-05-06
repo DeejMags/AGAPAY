@@ -1,35 +1,34 @@
 import React, { useEffect, useState } from 'react'
 import { auth } from '../firebase';
+import { signupWithEmail, signInWithGoogle, mapAuthError } from '../utils/firebaseAuthService';
 
 export default function SignupForm({ onSuccess, onFieldDirty }){
   // Google Sign Up handler
   async function handleGoogleSignup(e) {
     e.preventDefault();
     try {
-      const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-      try {
-        const r = await fetch('/api/auth/google', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: user.email, name: user.displayName, uid: user.uid })
-        });
-        if (!r.ok) throw new Error('Backend profile create failed');
-        const profile = await r.json();
-        const isAdmin = user.email === 'admin@agapay.com' || user.email === 'admin@gmail.com';
-        localStorage.setItem('user', JSON.stringify({ id: profile.id || user.uid, username: user.displayName, email: user.email, phone: user.phoneNumber || '', profilePic: user.photoURL || '', role: isAdmin ? 'admin' : 'user' }));
-        localStorage.setItem('token', user.uid);
-        if (isAdmin) { window.location.replace('/admin'); return; }
-        if (onSuccess) onSuccess(user);
-      } catch (err) {
-        console.warn('Failed to ensure backend profile for google signup', err);
-        // still proceed with client session
-        localStorage.setItem('user', JSON.stringify({ id: user.uid, username: user.displayName, email: user.email, phone: user.phoneNumber || '', profilePic: user.photoURL || '', role: 'user' }));
-        localStorage.setItem('token', user.uid);
-        if (onSuccess) onSuccess(user);
+      const { user, profile, isAdmin } = await signInWithGoogle();
+      
+      // Store profile and auth token
+      localStorage.setItem('user', JSON.stringify({
+        id: profile.id,
+        username: profile.username,
+        email: profile.email,
+        phone: profile.phone || '',
+        profilePic: user.photoURL || '',
+        role: profile.role,
+      }));
+      localStorage.setItem('token', user.uid);
+      
+      // Redirect admins to admin panel
+      if (isAdmin) {
+        window.location.replace('/admin');
+        return;
       }
+      
+      if (onSuccess) onSuccess(user);
     } catch (err) {
-      setError('Google sign up failed: ' + err.message);
+      setError(mapAuthError(err));
     }
   }
   const [firstName, setFirstName] = useState('')
@@ -69,79 +68,44 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
     try {
       setSubmitting(true);
       const normalizedEmail = email.trim().toLowerCase();
-      // Preflight check: ensure email is available
-      try {
-        const check = await fetch('/api/auth/check-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: normalizedEmail }) });
-        if (check.ok) {
-          const checkJson = await check.json();
-          if (!checkJson.available) {
-            setError('Email already exists');
-            setSubmitting(false);
-            return;
-          }
-        }
-      } catch (e) {
-        // If check fails, continue to attempt signup (server will still validate)
-        console.warn('Email availability check failed, proceeding to signup', e);
-      }
-      const isAdminEmail = normalizedEmail === 'admin@agapay.com' || normalizedEmail === 'admin@gmail.com';
-      const resolvedRole = isAdminEmail ? 'admin' : 'user';
-      const res = await fetch('/api/auth/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-          name: `${firstName} ${lastName}`.trim(),
-          email: email.trim(),
-          phone,
-          role: resolvedRole,
-          password,
-        })
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(()=>({ error: 'Signup failed' }));
-        if (res.status === 409) setError(j.error || 'Email already exists');
-        else setError(j.error || 'Signup failed');
-        setSubmitting(false);
-        return;
-      }
-      const json = await res.json();
-      const { signInWithEmailAndPassword, updateProfile } = await import('firebase/auth');
-      const cred = await signInWithEmailAndPassword(auth, email, password);
-      const fullName = `${firstName} ${lastName}`.trim();
-      await updateProfile(cred.user, { displayName: fullName });
-      const isAdmin = isAdminEmail;
-      const profile = {
-        id: json.id || cred.user.uid,
-        username: fullName,
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        email: email.trim(),
-        phone,
-        profilePic: cred.user.photoURL || '',
-        role: resolvedRole,
-      };
-      localStorage.setItem('user', JSON.stringify(profile));
-      localStorage.setItem('token', cred.user.uid);
-      if (!cred.user.emailVerified) {
-        try {
-          const { sendEmailVerification } = await import('firebase/auth');
-          await sendEmailVerification(cred.user);
-          setVerificationSent(true);
-          setCheckingVerification(true);
-          setShowVerificationModal(true);
-        } catch (e) {
-          setVerificationError('Failed to send verification email: ' + (e.message || String(e)));
-        }
+      
+      // Call Firebase signup service
+      const { user, profile, isAdmin } = await signupWithEmail(
+        normalizedEmail,
+        password,
+        firstName.trim(),
+        lastName.trim(),
+        phone
+      );
+
+      // Store profile and auth token
+      localStorage.setItem('user', JSON.stringify({
+        id: profile.id,
+        username: profile.username,
+        email: profile.email,
+        phone: profile.phone || '',
+        profilePic: user.photoURL || '',
+        role: profile.role,
+      }));
+      localStorage.setItem('token', user.uid);
+
+      // If email not verified yet, show verification flow
+      if (!user.emailVerified) {
+        setVerificationSent(true);
+        setCheckingVerification(true);
+        setShowVerificationModal(true);
       } else {
-        if (isAdmin) { window.location.replace('/admin'); return; }
-        if (onSuccess) onSuccess(cred.user);
+        // Email already verified, redirect
+        if (isAdmin) {
+          window.location.replace('/admin');
+        } else if (onSuccess) {
+          onSuccess(user);
+        }
       }
       setSubmitting(false);
     } catch (err) {
       console.error('Signup error', err);
-      setError('Sign up failed: ' + (err.message || String(err)));
+      setError(mapAuthError(err));
       setSubmitting(false);
     }
   }

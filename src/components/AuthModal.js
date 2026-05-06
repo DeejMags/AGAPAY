@@ -74,8 +74,8 @@ export default function AuthModal({ open, type='login', onClose }){
     <>
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div ref={backdropRef} className="absolute inset-0 bg-black opacity-40" onClick={handleBackdropClick} />
-      <div className="relative bg-white rounded-lg p-6 w-full max-w-md shadow-lg animate-fade-in">
-        <button className="absolute top-3 right-3 text-gray-600" onClick={() => {
+      <div className="relative bg-white rounded-lg p-4 sm:p-6 w-full max-w-md shadow-lg animate-fade-in max-h-[90vh] overflow-y-auto">
+        <button className="absolute top-2 right-2 sm:top-3 sm:right-3 text-gray-600 w-8 h-8 flex items-center justify-center hover:bg-gray-100 rounded" onClick={() => {
           if(type==='signup' && dirty){
             initiateAbort();
           } else {
@@ -97,7 +97,7 @@ export default function AuthModal({ open, type='login', onClose }){
         }}>
           ✕
         </button>
-        <h2 className="text-xl font-semibold mb-4 text-center">{type==='login' ? 'Login' : 'Sign up'}</h2>
+        <h2 className="text-lg sm:text-xl font-semibold mb-4 text-center">{type==='login' ? 'Login' : 'Sign up'}</h2>
         {/* Disable form contents if aborted */}
         <div className={aborted ? 'pointer-events-none opacity-50 select-none' : ''}>
           {signupEl}
