@@ -10,7 +10,7 @@ import {
   updateProfile,
   signOut,
 } from 'firebase/auth';
-import { collection, query, where, getDocs, addDoc, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 
 /**
  * Check if email exists in Firestore users collection

@@ -275,125 +275,124 @@ export default function ProductDetail(){
   })();
 
   return (
-    <div className="py-8 container mx-auto px-4">
-      <button type="button" onClick={goBackToMarketplace} className="inline-flex items-center gap-2 text-teal-600 hover:text-teal-700" aria-label="Back to Marketplace">
+    <div className="py-4 md:py-8 container mx-auto px-2 md:px-4">
+      <button type="button" onClick={goBackToMarketplace} className="inline-flex items-center gap-2 text-teal-600 hover:text-teal-700 text-sm md:text-base" aria-label="Back to Marketplace">
         <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#3FD2A6"><path d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"/></svg>
         <span className="hidden sm:inline font-medium">Back to Marketplace</span>
       </button>
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-6">
-  <div className="md:col-span-2">
-        <div className="bg-gray-100 rounded overflow-hidden">
-          {images.length > 1 ? (
-            <div className="relative">
-              <img src={images[index]} alt={product.title} className="w-full h-[520px] object-cover" />
-              <button onClick={()=>setIndex(i=> Math.max(0,i-1))} className="absolute left-2 top-1/2 -translate-y-1/2 bg-white bg-opacity-80 p-2 rounded">‹</button>
-              <button onClick={()=>setIndex(i=> Math.min(images.length-1,i+1))} className="absolute right-2 top-1/2 -translate-y-1/2 bg-white bg-opacity-80 p-2 rounded">›</button>
-              <div className="flex gap-2 p-2 overflow-auto bg-white">
-                {images.map((im,i)=> <img key={i} src={im} alt={product.title} onClick={()=>setIndex(i)} className={`w-12 h-8 sm:w-20 sm:h-14 object-cover rounded cursor-pointer ${i===index? 'ring-2 ring-teal-500' : ''}`} />)}
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+        {/* Main Image Section */}
+        <div className="md:col-span-2">
+          <div className="bg-gray-100 rounded overflow-hidden">
+            {images.length > 1 ? (
+              <div className="relative">
+                <img src={images[index]} alt={product.title} className="w-full h-60 md:h-96 lg:h-[520px] object-cover" />
+                <button onClick={()=>setIndex(i=> Math.max(0,i-1))} className="absolute left-2 top-1/2 -translate-y-1/2 bg-white bg-opacity-80 p-2 rounded hover:bg-opacity-100 transition">‹</button>
+                <button onClick={()=>setIndex(i=> Math.min(images.length-1,i+1))} className="absolute right-2 top-1/2 -translate-y-1/2 bg-white bg-opacity-80 p-2 rounded hover:bg-opacity-100 transition">›</button>
+                <div className="flex gap-2 p-2 overflow-x-auto bg-white border-t">
+                  {images.map((im,i)=> <img key={i} src={im} alt={product.title} onClick={()=>setIndex(i)} className={`w-14 h-10 md:w-20 md:h-14 object-cover rounded cursor-pointer flex-shrink-0 transition ${i===index? 'ring-2 ring-teal-500' : ''}`} />)}
+                </div>
               </div>
-            </div>
-          ) : (
-            <img src={images[0] || 'https://via.placeholder.com/800x600?text=No+Image'} alt={product.title} className="w-full h-[520px] object-cover" />
-          )}
-        </div>
-        <h1 className="text-2xl font-bold mt-4">{product.title || product.name || 'Product'}</h1>
-        <div className="text-xl text-teal-600">\u20b1{product.price}</div>
-  <div className="mt-3 text-gray-700">{product.desc || product.description}</div>
-  <div className="mt-2 text-sm text-gray-500">Category: {product.category} {product.location ? `· Location: ${product.location}` : ''}</div>
-      </div>
-      <aside className="md:col-span-1">
-        <div className="p-4 border rounded">
-          <div className="flex items-center gap-3">
-            {seller?.profilePic ? (
-              <img src={seller.profilePic} alt={seller ? `${sellerDisplayName} profile` : 'Seller profile'} className="w-12 h-12 bg-gray-200 rounded-full object-cover" />
             ) : (
-              <div className="w-12 h-12 rounded-full bg-teal-100 flex items-center justify-center text-teal-700 font-semibold">
-                {(sellerDisplayName || 'S').toString().trim().charAt(0).toUpperCase()}
-              </div>
+              <img src={images[0] || 'https://via.placeholder.com/800x600?text=No+Image'} alt={product.title} className="w-full h-60 md:h-96 lg:h-[520px] object-cover" />
             )}
-            <div>
-              <div className="font-semibold leading-tight">{sellerDisplayName}</div>
+          </div>
+
+          {/* Product Info Section */}
+          <div className="mt-4 md:mt-6">
+            <h1 className="text-2xl md:text-3xl font-bold">{product.title || product.name || 'Product'}</h1>
+            <div className="text-2xl md:text-3xl text-teal-600 font-bold mt-2">₱{product.price}</div>
+            <div className="mt-3 text-sm md:text-base text-gray-700">{product.desc || product.description}</div>
+            <div className="mt-2 text-xs md:text-sm text-gray-500 flex flex-wrap gap-2">
+              <span>Category: {product.category}</span>
+              {product.location && <span>· Location: {product.location}</span>}
             </div>
           </div>
-          {/* View Item removed on Product page as requested */}
-          <button onClick={openChat} className="mt-3 w-full p-2 bg-teal-600 text-white rounded">Message Seller</button>
-          <button
-            onClick={() => {
-              const target = seller?.id || product?.sellerId || product?.owner;
-              if (target) navigate(`/profile/${target}`);
-            }}
-            className="mt-2 w-full p-2 border rounded"
-          >
-            View seller profile
-          </button>
+        </div>
 
-          {selectedType && (
-            <div className="mb-3">
-              <div className="inline-flex items-center gap-2 px-3 py-2 bg-teal-50 border rounded text-sm text-teal-800">
-                <img src={selectedType === 'delivery' ? deliveryIcon : boxIcon} alt={selectedType} className="w-4 h-4" />
-                <span>You selected: {selectedType === 'delivery' ? 'Delivery' : 'Pickup'}</span>
+        {/* Seller Card & Actions Sidebar */}
+        <aside className="md:col-span-1 space-y-4">
+          {/* Seller Card */}
+          <div className="p-4 border rounded-lg bg-white">
+            <div className="flex items-center gap-3 mb-4">
+              {seller?.profilePic ? (
+                <img src={seller.profilePic} alt={seller ? `${sellerDisplayName} profile` : 'Seller profile'} className="w-12 h-12 bg-gray-200 rounded-full object-cover flex-shrink-0" />
+              ) : (
+                <div className="w-12 h-12 rounded-full bg-teal-100 flex items-center justify-center text-teal-700 font-semibold flex-shrink-0">
+                  {(sellerDisplayName || 'S').toString().trim().charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div className="min-w-0">
+                <div className="font-semibold leading-tight truncate">{sellerDisplayName}</div>
+              </div>
+            </div>
+            <button onClick={openChat} className="w-full p-2 bg-teal-600 text-white rounded font-medium hover:bg-teal-700 transition text-sm md:text-base">Message Seller</button>
+            <button
+              onClick={() => {
+                const target = seller?.id || product?.sellerId || product?.owner;
+                if (target) navigate(`/profile/${target}`);
+              }}
+              className="mt-2 w-full p-2 border rounded font-medium hover:bg-gray-50 transition text-sm md:text-base"
+            >
+              View seller profile
+            </button>
+          </div>
+
+          {/* Order Options Card */}
+          {(product.delivery || product.pickup) && (
+            <div className="p-4 border rounded-lg bg-white">
+              {selectedType && (
+                <div className="mb-3 p-2 bg-teal-50 border border-teal-200 rounded text-sm text-teal-800 flex items-center gap-2">
+                  <img src={selectedType === 'delivery' ? deliveryIcon : boxIcon} alt={selectedType} className="w-4 h-4 flex-shrink-0" />
+                  <span>Selected: {selectedType === 'delivery' ? 'Delivery' : 'Pickup'}</span>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                {product.delivery && (
+                  <button onClick={() => handleOrder('delivery')} className="w-full p-2 md:p-3 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 transition text-sm md:text-base inline-flex flex-col items-center justify-center gap-1">
+                    <img src={deliveryIcon} alt="delivery" className="w-4 h-4" />
+                    <span className="hidden sm:inline">Delivery</span>
+                  </button>
+                )}
+                {product.pickup && (
+                  <button onClick={() => handleOrder('pickup')} className="w-full p-2 md:p-3 bg-green-600 text-white rounded font-medium hover:bg-green-700 transition text-sm md:text-base inline-flex flex-col items-center justify-center gap-1">
+                    <img src={boxIcon} alt="pickup" className="w-4 h-4" />
+                    <span className="hidden sm:inline">Pickup</span>
+                  </button>
+                )}
               </div>
             </div>
           )}
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            {product.delivery && (
-              <button onClick={() => handleOrder('delivery')} className="w-full p-2 bg-blue-600 text-white rounded inline-flex items-center justify-center">
-                <img src={deliveryIcon} alt="delivery" className="w-4 h-4 mr-2" />
-                <span>Delivery</span>
-              </button>
-            )}
-            {product.pickup && (
-              <button onClick={() => handleOrder('pickup')} className="w-full p-2 bg-green-600 text-white rounded inline-flex items-center justify-center">
-                <img src={boxIcon} alt="pickup" className="w-4 h-4 mr-2" />
-                <span>Pickup</span>
-              </button>
-            )}
-          </div>
-          {notifyModal.open && (
-            <AdminNotifiedModal
-              open={notifyModal.open}
-              type={notifyModal.type}
-              productTitle={notifyModal.title}
-              productDescription={product.desc || product.description || ''}
-              selectedType={notifyModal.type || selectedType}
-              supportsDelivery={!!product.delivery}
-              supportsPickup={!!product.pickup}
-              onClose={() => { setNotifyModal({ open: false, type: 'delivery', title: '' }); }}
-            />
-          )}
 
-          {/* Consolidated item location container placed directly under the View seller profile button */}
-          <div className="mt-4 border rounded-lg p-3 bg-white">
-            <h4 className="font-semibold mb-2">Item location</h4>
-
-            {/* If we have numeric coords (either stored on the product or discovered via geocoding), show a clickable thumbnail that opens the fullscreen map */}
+          {/* Location Card */}
+          <div className="p-4 border rounded-lg bg-white">
+            <h4 className="font-semibold mb-3 text-sm md:text-base">Item location</h4>
             {((typeof product.locationLat === 'number' && typeof product.locationLng === 'number') || geoCoords) ? (
-              <div className="w-full max-w-[300px] rounded-lg overflow-hidden border cursor-pointer" onClick={() => setMapOpen(true)}>
+              <div className="w-full rounded-lg overflow-hidden border cursor-pointer hover:shadow-lg transition" onClick={() => setMapOpen(true)}>
                 <MapEmbed
                   lat={(typeof product.locationLat === 'number' && typeof product.locationLng === 'number') ? product.locationLat : geoCoords?.lat}
                   lng={(typeof product.locationLat === 'number' && typeof product.locationLng === 'number') ? product.locationLng : geoCoords?.lng}
-                  height="190px"
+                  height="150px"
                   showLink={false}
                 />
               </div>
             ) : product.location ? (
-              /* Only textual location available: show the text and give a clear action to open in OSM */
               <div className="text-sm text-gray-700">
-                <div className="break-words">{product.location}</div>
+                <div className="break-words mb-2">{product.location}</div>
                 {geocoding ? (
-                  <span className="ml-2 text-xs text-gray-500">(locating...)</span>
+                  <span className="text-xs text-gray-500">(locating...)</span>
                 ) : (
-                  <div className="mt-2">
+                  <div className="flex flex-col gap-2">
                     <a
-                      className="inline-block px-3 py-1 bg-teal-50 text-teal-700 border rounded hover:bg-teal-100"
+                      className="inline-block px-3 py-2 bg-teal-50 text-teal-700 border rounded hover:bg-teal-100 transition text-xs md:text-sm text-center"
                       target="_blank"
                       rel="noopener noreferrer"
                       href={`https://www.openstreetmap.org/search?query=${encodeURIComponent(product.location)}`}
                     >
-                      Open location in OpenStreetMap
+                      Open in OSM
                     </a>
                     {geoCoords && (
-                      <button onClick={() => setMapOpen(true)} className="ml-2 inline-block px-3 py-1 bg-teal-600 text-white rounded">View on map</button>
+                      <button onClick={() => setMapOpen(true)} className="px-3 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 transition text-xs md:text-sm">View on map</button>
                     )}
                   </div>
                 )}
@@ -403,49 +402,59 @@ export default function ProductDetail(){
             )}
           </div>
 
-          {/* Fullscreen map modal when mapOpen is true */}
-          {mapOpen && ((typeof product.locationLat === 'number' && typeof product.locationLng === 'number') || geoCoords) && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
-              <div className="bg-white rounded-lg shadow-lg w-[95%] max-w-4xl h-[88%] overflow-hidden relative">
-                <button className="absolute top-3 right-3 z-50 bg-white rounded-full p-2 shadow" onClick={() => setMapOpen(false)} aria-label="Close map">×</button>
-                <MapEmbed
-                  lat={(typeof product.locationLat === 'number' && typeof product.locationLng === 'number') ? product.locationLat : geoCoords?.lat}
-                  lng={(typeof product.locationLat === 'number' && typeof product.locationLng === 'number') ? product.locationLng : geoCoords?.lng}
-                  height="100%"
-                />
-              </div>
+          {/* Ratings Card */}
+          <div className="p-4 border rounded-lg bg-white">
+            <h3 className="font-semibold mb-3 text-sm md:text-base">Ratings</h3>
+            <div className="space-y-2">
+              {seller && (seller.ratings || []).length ? seller.ratings.map((r,i)=> (
+                <div key={i} className="border-b pb-2 last:border-b-0">
+                  <RatingStars value={r.ratingValue} />
+                  <div className="text-xs md:text-sm text-gray-600 mt-1">{r.comment}</div>
+                </div>
+              )) : <div className="text-sm text-gray-500">No ratings yet</div>}
             </div>
-          )}
-        </div>
-
-        <div className="mt-4 p-4 border rounded">
-          <h3 className="font-semibold">Ratings</h3>
-          <div className="mt-2">
-            {seller && (seller.ratings || []).length ? seller.ratings.map((r,i)=> (
-              <div key={i} className="border-b py-2">
-                <RatingStars value={r.ratingValue} />
-                <div className="text-sm text-gray-600">{r.comment}</div>
-              </div>
-            )) : <div className="text-sm text-gray-500">No ratings yet</div>}
           </div>
+        </aside>
 
-          <div className="mt-3">
-            {/* Rating UI will be shown only after product arrival logic is implemented. */}
+        {/* Fullscreen map modal */}
+        {mapOpen && ((typeof product.locationLat === 'number' && typeof product.locationLng === 'number') || geoCoords) && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-4">
+            <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl h-96 md:h-[88vh] overflow-hidden relative">
+              <button className="absolute top-3 right-3 z-50 bg-white rounded-full p-2 shadow hover:bg-gray-100 transition" onClick={() => setMapOpen(false)} aria-label="Close map">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
+              <MapEmbed
+                lat={(typeof product.locationLat === 'number' && typeof product.locationLng === 'number') ? product.locationLat : geoCoords?.lat}
+                lng={(typeof product.locationLat === 'number' && typeof product.locationLng === 'number') ? product.locationLng : geoCoords?.lng}
+                height="100%"
+              />
+            </div>
           </div>
-        </div>
-      </aside>
+        )}
 
-      {/* Map card removed: now shown inside the seller card above */}
+        {notifyModal.open && (
+          <AdminNotifiedModal
+            open={notifyModal.open}
+            type={notifyModal.type}
+            productTitle={notifyModal.title}
+            productDescription={product.desc || product.description || ''}
+            selectedType={notifyModal.type || selectedType}
+            supportsDelivery={!!product.delivery}
+            supportsPickup={!!product.pickup}
+            onClose={() => { setNotifyModal({ open: false, type: 'delivery', title: '' }); }}
+          />
+        )}
+      </div>
 
+      {/* Recommended Products Section */}
       {recommended.length > 0 && (
-        <div className="md:col-span-3 mt-6">
-          <h3 className="font-semibold">Recommended for you</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+        <div className="mt-8 md:mt-12">
+          <h3 className="text-xl md:text-2xl font-semibold mb-4">Recommended for you</h3>
+          <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
             {recommended.map(r=> <ProductCard key={r._id || r.id} product={r} />)}
           </div>
         </div>
       )}
-    </div>
     </div>
   )
 }

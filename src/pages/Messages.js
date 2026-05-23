@@ -464,23 +464,23 @@ export default function Messages(){
   // removed unused helper fileToBase64 (not used)
 
   return (
-    <div className="py-8 container mx-auto px-4">
+    <div className="py-4 md:py-8 container mx-auto px-2 md:px-4">
       {loading && <FullScreenLoader />}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Messages</h1>
+      <div className="flex items-center justify-between mb-4 md:mb-6">
+        <h1 className="text-xl md:text-2xl font-bold">Messages</h1>
       </div>
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-6">
-        {/* Sidebar - always rendered for layout stability */}
-        <div className="md:col-span-1">
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4 md:gap-6 h-[calc(100vh-200px)] md:h-auto">
+        {/* Sidebar - hidden on mobile, visible on desktop */}
+        <div className="hidden md:block md:col-span-1">
           <div>
-            <div className="static bg-gradient-to-r from-teal-500 to-teal-400 rounded-t-xl px-4 py-4 flex items-center gap-2 shadow-sm">
+            <div className="static bg-gradient-to-r from-teal-500 to-teal-400 rounded-t-xl px-4 py-3 md:py-4 flex items-center gap-2 shadow-sm">
               <div className="relative flex items-center gap-2">
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" height="18" viewBox="0 -960 960 960" width="18" fill="white"><path d="M80-80v-740q0-24 18-42t42-18h680q24 0 42 18t18 42v520q0 24-18 42t-42 18H240L80-80Zm134-220h606v-520H140v600l74-80Zm-74 0v-520 520Z"/></svg>
                 <h3 className="font-semibold text-lg text-white">Conversations</h3>
               </div>
             </div>
           </div>
-          <div className="space-y-2 max-h-[48rem] overflow-auto pr-1 bg-white rounded-b-xl shadow border border-blue-100">
+          <div className="space-y-2 max-h-[calc(100vh-300px)] overflow-auto pr-1 bg-white rounded-b-xl shadow border border-blue-100">
             {conversations.length ? conversations.map(c=> (
               <button key={c.chatId} onClick={()=>setSelectedChat(c.chatId)} className={`w-full text-left p-3 border-b last:border-b-0 flex items-center gap-3 transition duration-150 rounded-none ${selectedChat===c.chatId ? 'bg-blue-50 border-blue-400' : 'hover:bg-blue-100'}`} style={{borderRadius: selectedChat===c.chatId ? '12px' : '0'}}>
                 <div className="relative">
@@ -492,7 +492,7 @@ export default function Messages(){
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className={`font-semibold truncate ${selectedChat===c.chatId ? 'text-blue-700' : 'text-gray-800'}`}>
+                  <div className={`font-semibold truncate text-sm md:text-base ${selectedChat===c.chatId ? 'text-blue-700' : 'text-gray-800'}`}>
                     {c.otherName || displayName(userCache[c.otherId]) || 'Loading…'}
                   </div>
                   <div className="text-xs text-gray-500 truncate">
@@ -503,7 +503,6 @@ export default function Messages(){
                       const base = (last.text && String(last.text).trim()) ? last.text : '[Photo]';
                       const fromMe = last.senderId && meId && String(last.senderId) === String(meId);
                       const youPrefix = fromMe ? 'You: ' : '';
-                      // If last is from me and the other user's unread is zero, show ✓✓, else ✓; otherwise no mark
                       let ticks = '';
                       if (fromMe) {
                         const parts = [meId, c.otherId].filter(Boolean).map(String);
@@ -515,24 +514,23 @@ export default function Messages(){
                     })()}
                   </div>
                 </div>
-                {/* Single unread indicator (dot on avatar); remove trailing badge for cleaner UI */}
               </button>
             )) : (
-              <div className="p-6 text-center text-gray-500">No conversations yet</div>
+              <div className="p-6 text-center text-gray-500 text-sm">No conversations yet</div>
             )}
           </div>
         </div>
 
         {/* Chat Area */}
-        <div className="md:col-span-3">
+        <div className="col-span-1 md:col-span-3 flex flex-col">
           {selectedChat ? (
-            <div className="flex flex-col gap-4 bg-white rounded-xl shadow p-6 border min-h-[48rem]">
+            <div className="flex flex-col gap-3 md:gap-4 bg-white rounded-xl shadow p-3 md:p-6 border h-full">
               <div className="flex items-center justify-between pb-3 border-b">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center">
-                    {/* avatar placeholder - could resolve other user's avatar */}
+                <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
+                  <div className="w-10 md:w-12 h-10 md:h-12 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center flex-shrink-0">
+                    {/* avatar placeholder */}
                   </div>
-                  <div className="font-semibold text-lg">
+                  <div className="font-semibold text-base md:text-lg truncate">
                     {(() => {
                       const conv = conversations.find(x => x.chatId === selectedChat);
                       const nm = conv?.otherName || displayName(userCache[conv?.otherId]) || '';
@@ -540,31 +538,29 @@ export default function Messages(){
                     })()}
                   </div>
                 </div>
-                <div className="flex items-center gap-3 relative">
-                  <div className="text-xs text-gray-500">Messages</div>
-                  {/* Kebab (three dots) menu button */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="hidden sm:inline text-xs text-gray-500">Messages</div>
+                  {/* Kebab menu button */}
                   <button
                     type="button"
                     onClick={() => setShowActions(s => !s)}
-                    className="w-10 h-10 flex items-center justify-center rounded-md border border-gray-200 hover:bg-gray-100 active:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500 transition"
+                    className="w-9 md:w-10 h-9 md:h-10 flex items-center justify-center rounded-md border border-gray-200 hover:bg-gray-100 active:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500 transition"
                     aria-haspopup="true"
                     aria-expanded={showActions ? 'true' : 'false'}
                     aria-label="Conversation actions"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-6 h-6 text-gray-600" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-5 md:w-6 h-5 md:h-6 text-gray-600" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
                   </button>
                   {showActions && (
-                    <div className="absolute right-0 top-full mt-2 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-20 animate-fade-in">
+                    <div className="absolute right-2 md:right-0 top-full mt-2 w-48 md:w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-20 animate-fade-in">
                       <ul className="py-1 text-sm" role="menu">
                         <li>
                           <button
                             role="menuitem"
                             onClick={async () => {
-                              // Resolve other participant id
                               const conv = conversations.find(c => c.chatId === selectedChat);
                               const meId = (auth && auth.currentUser && auth.currentUser.uid) || (JSON.parse(localStorage.getItem('user')||'null')?.id);
                               let otherId = conv && conv.otherId;
-                              // If missing or equals me (due to legacy type mismatch), re-resolve from conversation meta
                               if (!otherId || (meId && String(otherId) === String(meId))) {
                                 try {
                                   const meta = await msgService.getConversationMeta(selectedChat);
@@ -624,7 +620,7 @@ export default function Messages(){
                 </div>
               </div>
 
-              <div ref={listRef} className="p-3 border rounded flex-1 overflow-auto flex flex-col gap-3 bg-gray-50">
+              <div ref={listRef} className="p-2 md:p-3 border rounded flex-1 overflow-auto flex flex-col gap-2 md:gap-3 bg-gray-50">
                 {(() => {
                   let lastDate = null;
                   return messages.map((m) => {
@@ -648,13 +644,13 @@ export default function Messages(){
                 })()}
               </div>
 
-              <div className="flex gap-2 mt-2 items-center">
+              <div className="flex gap-1 md:gap-2 mt-2 items-end">
                 <input id="chat-image-input" type="file" accept="image/*" className="hidden" onChange={e=> setImageFile(e.target.files && e.target.files[0])} />
-                <label htmlFor="chat-image-input" className="cursor-pointer p-2 rounded hover:bg-gray-100">
-                  <svg className="w-6 h-6 text-teal-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M180-120q-24 0-42-18t-18-42v-600q0-24 18-42t42-18h600q24 0 42 18t18 42v600q0 24-18 42t-42 18H180Zm0-60h600v-600H180v600Zm56-97h489L578-473 446-302l-93-127-117 152Zm-56 97v-600 600Z"/></svg>
+                <label htmlFor="chat-image-input" className="cursor-pointer p-2 rounded hover:bg-gray-100 flex-shrink-0">
+                  <svg className="w-5 md:w-6 h-5 md:h-6 text-teal-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M180-120q-24 0-42-18t-18-42v-600q0-24 18-42t42-18h600q24 0 42 18t18 42v600q0 24-18 42t-42 18H180Zm0-60h600v-600H180v600Zm56-97h489L578-473 446-302l-93-127-117 152Zm-56 97v-600 600Z"/></svg>
                 </label>
                 <input
-                  className="flex-1 p-2 border rounded"
+                  className="flex-1 p-2 border rounded text-sm md:text-base"
                   value={text}
                   onChange={e=>setText(e.target.value)}
                   placeholder="Type a message"
@@ -665,18 +661,20 @@ export default function Messages(){
                     }
                   }}
                 />
-                <button onClick={send} className="px-6 py-2 bg-teal-600 text-white rounded text-base font-medium">Send</button>
+                <button onClick={send} className="px-4 md:px-6 py-2 bg-teal-600 text-white rounded text-sm md:text-base font-medium flex-shrink-0 hover:bg-teal-700">Send</button>
               </div>
               {/* Show image preview if selected */}
               {imageFile && (
                 <div className="flex items-center gap-2 mt-2">
-                  <img src={URL.createObjectURL(imageFile)} alt="preview" className="w-40 h-24 object-cover rounded-xl" />
+                  <img src={URL.createObjectURL(imageFile)} alt="preview" className="w-24 md:w-40 h-16 md:h-24 object-cover rounded-xl" />
                   <button className="text-red-600 text-xs" onClick={()=>setImageFile(null)}>Remove</button>
                 </div>
               )}
             </div>
           ) : (
-            <div className="p-8 border rounded bg-white text-center text-gray-500 min-h-[48rem] flex items-center justify-center">Select a conversation to start chatting.</div>
+            <div className="p-6 md:p-8 border rounded bg-white text-center text-gray-500 h-full flex items-center justify-center text-sm md:text-base">
+              {conversations.length > 0 ? 'Select a conversation to start chatting.' : 'No conversations yet. Start a conversation by messaging someone!'}
+            </div>
           )}
         </div>
       </div>

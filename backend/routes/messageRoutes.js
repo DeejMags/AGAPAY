@@ -5,6 +5,7 @@ const controller = require('../controllers/messageController');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { messageLimiter } = require('../config/rateLimiter');
 
 // Ensure uploads/messages directory exists
 const uploadDir = path.join(process.cwd(), 'uploads', 'messages');
@@ -27,7 +28,7 @@ const upload = multer({ storage, fileFilter, limits: { fileSize: 8 * 1024 * 1024
 router.get('/conversations', auth, controller.listConversations);
 router.get('/:id', auth, controller.getConversation);
 router.post('/start', auth, controller.startConversation);
-router.post('/send', auth, controller.sendMessage);
+router.post('/send', auth, messageLimiter, controller.sendMessage);
 router.post('/:id/read', auth, controller.markRead);
 // Multipart upload for message images
 router.post('/upload', auth, upload.single('file'), controller.uploadMessageImage);

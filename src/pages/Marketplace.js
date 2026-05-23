@@ -42,6 +42,7 @@ export default function Marketplace(){
   const [sidebarRating, setSidebarRating] = useState('')
   const [sidebarDelivery, setSidebarDelivery] = useState(false)
   const [sidebarPickup, setSidebarPickup] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false) // Mobile sidebar state
 
   useEffect(() => {
     let cancelled = false;
@@ -119,37 +120,54 @@ export default function Marketplace(){
   // ...existing code...
 
   return (
-    <div className="py-8">
-      <div className="container mx-auto px-4">
+    <div className="py-6 md:py-8">
+      <div className="container mx-auto px-2 md:px-4">
         {/* categories pill bar */}
-        <div className="overflow-auto py-2">
-          <div className="flex gap-2">
+        <div className="overflow-x-auto py-2 mb-4">
+          <div className="flex gap-2 whitespace-nowrap">
             {['All','electronics','fashion','home & living','furniture','home','sports','services','others'].map(cat => (
-              <button key={cat} onClick={()=> setCategory(cat==='All' ? '' : cat)} className={`px-3 py-1 rounded-full border ${category === (cat==='All' ? '' : cat) ? 'bg-teal-600 text-white' : 'bg-white text-gray-700'}`}>
+              <button key={cat} onClick={()=> setCategory(cat==='All' ? '' : cat)} className={`px-3 py-1 rounded-full border text-sm sm:text-base flex-shrink-0 ${category === (cat==='All' ? '' : cat) ? 'bg-teal-600 text-white' : 'bg-white text-gray-700'}`}>
                 {cat.charAt(0).toUpperCase() + cat.slice(1)}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <aside className="md:col-span-1">
-            <div className="p-4 border rounded bg-white">
-              <h3 className="font-semibold mb-2">Filters</h3>
-              <div className="mb-3">
-                <input placeholder="Location" className="w-full p-2 border rounded" value={sidebarLocation} onChange={e=>setSidebarLocation(e.target.value)} />
+        {/* Mobile filter button + Desktop sidebar + Products grid */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 md:gap-4">
+          {/* Mobile Filters Button */}
+          <div className="md:hidden mb-2">
+            <button 
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="w-full p-3 bg-teal-600 text-white rounded font-semibold flex items-center justify-between"
+            >
+              <span>Filters</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="4" y1="6" x2="20" y2="6"></line>
+                <line x1="4" y1="12" x2="20" y2="12"></line>
+                <line x1="4" y1="18" x2="20" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+
+          {/* Desktop Sidebar */}
+          <aside className="hidden md:block md:col-span-1">
+            <div className="p-4 border rounded bg-white sticky top-20">
+              <h3 className="font-semibold mb-4">Filters</h3>
+              <div className="mb-4">
+                <input placeholder="Location" className="w-full p-2 border rounded text-sm" value={sidebarLocation} onChange={e=>setSidebarLocation(e.target.value)} />
               </div>
-              <div className="mb-3">
-                <label className="block text-sm mb-1">Price range</label>
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2">Price range</label>
                 <div className="flex gap-2 mb-2">
-                  <input type="number" min="0" placeholder="Min" className="w-1/2 p-2 border rounded" value={sidebarMinPrice} onChange={e=>setSidebarMinPrice(e.target.value)} />
-                  <input type="number" min="0" placeholder="Max" className="w-1/2 p-2 border rounded" value={sidebarMaxPrice} onChange={e=>setSidebarMaxPrice(e.target.value)} />
+                  <input type="number" min="0" placeholder="Min" className="w-1/2 p-2 border rounded text-sm" value={sidebarMinPrice} onChange={e=>setSidebarMinPrice(e.target.value)} />
+                  <input type="number" min="0" placeholder="Max" className="w-1/2 p-2 border rounded text-sm" value={sidebarMaxPrice} onChange={e=>setSidebarMaxPrice(e.target.value)} />
                 </div>
-                <button className="w-full p-2 bg-teal-600 text-white rounded" onClick={()=>{ setMinPrice(sidebarMinPrice); setMaxPrice(sidebarMaxPrice); }}>Apply</button>
+                <button className="w-full p-2 bg-teal-600 text-white rounded text-sm font-medium hover:bg-teal-700" onClick={()=>{ setMinPrice(sidebarMinPrice); setMaxPrice(sidebarMaxPrice); }}>Apply</button>
               </div>
-              <div className="mb-3">
-                <label className="block text-sm mb-1">Ratings</label>
-                <select className="w-full p-2 border rounded" value={sidebarRating} onChange={e=>setSidebarRating(e.target.value)}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2">Ratings</label>
+                <select className="w-full p-2 border rounded text-sm" value={sidebarRating} onChange={e=>setSidebarRating(e.target.value)}>
                   <option value="">All ratings</option>
                   <option value="1">1 star & up</option>
                   <option value="2">2 stars & up</option>
@@ -158,9 +176,9 @@ export default function Marketplace(){
                   <option value="5">5 stars</option>
                 </select>
               </div>
-              <div className="mb-3">
-                <label className="block text-sm mb-1">Category</label>
-                <select className="w-full p-2 border rounded" value={category} onChange={e=>setCategory(e.target.value)}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2">Category</label>
+                <select className="w-full p-2 border rounded text-sm" value={category} onChange={e=>setCategory(e.target.value)}>
                   <option value="">All categories</option>
                   <option value="electronics">Electronics</option>
                   <option value="home & living">Home & Living</option>
@@ -173,25 +191,88 @@ export default function Marketplace(){
                 </select>
               </div>
               <div className="mb-3">
-                <label className="block text-sm mb-1">Fulfillment</label>
-                <div className="flex items-center gap-3">
-                  <label className="inline-flex items-center gap-2"><input type="checkbox" checked={sidebarDelivery} onChange={e=>setSidebarDelivery(e.target.checked)} /> Delivery</label>
-                  <label className="inline-flex items-center gap-2"><input type="checkbox" checked={sidebarPickup} onChange={e=>setSidebarPickup(e.target.checked)} /> Pickup</label>
+                <label className="block text-sm font-medium mb-2">Fulfillment</label>
+                <div className="flex flex-col gap-2">
+                  <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={sidebarDelivery} onChange={e=>setSidebarDelivery(e.target.checked)} /> Delivery</label>
+                  <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={sidebarPickup} onChange={e=>setSidebarPickup(e.target.checked)} /> Pickup</label>
                 </div>
               </div>
             </div>
           </aside>
-          <div className="md:col-span-3">
-            <div className="flex gap-2 items-center mb-2">
-              <select value={sortBy} onChange={e=>setSortBy(e.target.value)} className="p-2 border rounded">
+
+          {/* Mobile Filter Drawer */}
+          {sidebarOpen && (
+            <div className="md:hidden fixed inset-0 z-40 bg-black bg-opacity-50 flex items-end">
+              <div className="w-full bg-white rounded-t-2xl p-4 max-h-96 overflow-y-auto">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-semibold text-lg">Filters</h3>
+                  <button onClick={() => setSidebarOpen(false)} className="text-gray-500 hover:text-gray-700">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+                <div className="mb-3">
+                  <label className="block text-sm font-medium mb-1">Location</label>
+                  <input placeholder="Location" className="w-full p-2 border rounded text-sm" value={sidebarLocation} onChange={e=>setSidebarLocation(e.target.value)} />
+                </div>
+                <div className="mb-3">
+                  <label className="block text-sm font-medium mb-1">Price range</label>
+                  <div className="flex gap-2 mb-2">
+                    <input type="number" min="0" placeholder="Min" className="w-1/2 p-2 border rounded text-sm" value={sidebarMinPrice} onChange={e=>setSidebarMinPrice(e.target.value)} />
+                    <input type="number" min="0" placeholder="Max" className="w-1/2 p-2 border rounded text-sm" value={sidebarMaxPrice} onChange={e=>setSidebarMaxPrice(e.target.value)} />
+                  </div>
+                  <button className="w-full p-2 bg-teal-600 text-white rounded text-sm font-medium hover:bg-teal-700" onClick={()=>{ setMinPrice(sidebarMinPrice); setMaxPrice(sidebarMaxPrice); setSidebarOpen(false); }}>Apply</button>
+                </div>
+                <div className="mb-3">
+                  <label className="block text-sm font-medium mb-1">Ratings</label>
+                  <select className="w-full p-2 border rounded text-sm" value={sidebarRating} onChange={e=>setSidebarRating(e.target.value)}>
+                    <option value="">All ratings</option>
+                    <option value="1">1 star & up</option>
+                    <option value="2">2 stars & up</option>
+                    <option value="3">3 stars & up</option>
+                    <option value="4">4 stars & up</option>
+                    <option value="5">5 stars</option>
+                  </select>
+                </div>
+                <div className="mb-3">
+                  <label className="block text-sm font-medium mb-1">Category</label>
+                  <select className="w-full p-2 border rounded text-sm" value={category} onChange={e=>setCategory(e.target.value)}>
+                    <option value="">All categories</option>
+                    <option value="electronics">Electronics</option>
+                    <option value="home & living">Home & Living</option>
+                    <option value="furniture">Furniture</option>
+                    <option value="sports">Sports</option>
+                    <option value="fashion">Fashion</option>
+                    <option value="home">Home</option>
+                    <option value="services">Services</option>
+                    <option value="others">Others</option>
+                  </select>
+                </div>
+                <div className="mb-3">
+                  <label className="block text-sm font-medium mb-2">Fulfillment</label>
+                  <div className="flex flex-col gap-2">
+                    <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={sidebarDelivery} onChange={e=>setSidebarDelivery(e.target.checked)} /> Delivery</label>
+                    <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={sidebarPickup} onChange={e=>setSidebarPickup(e.target.checked)} /> Pickup</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Products Section */}
+          <div className="col-span-1 md:col-span-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+              <h2 className="text-lg sm:text-xl font-semibold">All listings</h2>
+              <select value={sortBy} onChange={e=>setSortBy(e.target.value)} className="p-2 border rounded text-sm sm:text-base">
                 <option value="newest">Newest</option>
                 <option value="alpha">Alphabetical (A → Z)</option>
                 <option value="low">Lowest price</option>
                 <option value="high">Highest price</option>
               </select>
             </div>
-            <h2 className="mt-2 text-xl font-semibold">All listings</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-4">
+            <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3 md:gap-4">
               {filtered.map((i, idx)=> <ProductCard key={i._id || i.id} product={i} index={idx} style={{ '--delay': `${idx * 60}ms` }} />)}
             </div>
           </div>
