@@ -1,7 +1,5 @@
 import React, { useState } from 'react'
-import { auth } from '../firebase';
-import { loginWithEmail, signInWithGoogle, mapAuthError, isUserBanned, getBanReason } from '../utils/firebaseAuthService';
-import { signOut } from 'firebase/auth';
+import { loginWithEmail, signInWithGoogle, mapAuthError } from '../utils/firebaseAuthService';
 
 export default function LoginForm({ onSuccess }){
   const [bannedOpen, setBannedOpen] = useState(false);
