@@ -1,6 +1,7 @@
 const { admin, db } = require('../config/firebaseAdmin');
 const cloudinary = require('../config/cloudinary');
 const { sanitizeUnlocked, isValidBadgeTier, BADGE_THRESHOLDS, badgeLabelFromTier } = require('../config/badges');
+const { buildUserNameData } = require('../utils/nameUtils');
 
 function isAdminUser(user = {}) {
   if (!user || typeof user !== 'object') return false;
@@ -66,16 +67,40 @@ function normalizeBadgeSelection(value) {
   return normalized;
 }
 
+function normalizeUserProfile(data = {}) {
+  const nameData = buildUserNameData({
+    firstName: data.firstName,
+    lastName: data.lastName,
+    name: data.name,
+    username: data.username,
+    displayName: data.displayName,
+    fullName: data.fullName,
+    email: data.email,
+  });
+
+  return {
+    ...(data || {}),
+    firstName: nameData.firstName || data.firstName || '',
+    lastName: nameData.lastName || data.lastName || '',
+    fullName: nameData.fullName || data.fullName || '',
+    displayName: nameData.displayName || data.displayName || '',
+    username: nameData.username || data.username || '',
+    name: data.name || nameData.fullName || data.fullName || '',
+    email: data.email || '',  // IMPORTANT: Always include email
+  };
+}
+
 
 exports.getAllUsers = async (req, res) => {
   try {
     const snapshot = await db.collection('users').get();
     const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    // Remove sensitive fields and normalize timestamps
+    // Remove sensitive fields, normalize timestamps, and synthesize name fields
     const safe = users.map(u => {
       const { password, ...rest } = u;
+      const norm = normalizeUserProfile(rest);
       return {
-        ...rest,
+        ...norm,
         createdAt: rest.createdAt ? (rest.createdAt.toDate ? rest.createdAt.toDate().toISOString() : new Date(rest.createdAt).toISOString()) : null
       };
     });
@@ -104,17 +129,17 @@ exports.getUserById = async (req, res) => {
     // Try direct doc lookup first
     let docRef = db.collection('users').doc(id);
     let doc = await docRef.get();
-    if (doc.exists) return res.json({ id: doc.id, ...doc.data() });
+    if (doc.exists) return res.json({ id: doc.id, ...normalizeUserProfile(doc.data()) });
 
     // If not found, allow lookup by authId (Firebase UID) or email as fallback
     // This handles cases where the frontend passes Firebase auth uid instead of Firestore doc id
     const byAuth = await db.collection('users').where('authId', '==', id).limit(1).get();
-    if (!byAuth.empty) return res.json({ id: byAuth.docs[0].id, ...byAuth.docs[0].data() });
+    if (!byAuth.empty) return res.json({ id: byAuth.docs[0].id, ...normalizeUserProfile(byAuth.docs[0].data()) });
 
     // Lastly, try email lookup if the id looks like an email
     if (typeof id === 'string' && id.includes('@')) {
       const byEmail = await db.collection('users').where('email', '==', id).limit(1).get();
-      if (!byEmail.empty) return res.json({ id: byEmail.docs[0].id, ...byEmail.docs[0].data() });
+      if (!byEmail.empty) return res.json({ id: byEmail.docs[0].id, ...normalizeUserProfile(byEmail.docs[0].data()) });
     }
 
     // As a last resort, try to fetch Firebase Auth user with this id
@@ -143,8 +168,10 @@ exports.updateUser = async (req, res) => {
   const payload = { ...(req.body || {}) };
   if (payload.email) payload.email = String(payload.email).trim();
   if (payload.phone) payload.phone = String(payload.phone).trim();
+  else delete payload.phone;
   if (payload.name) payload.name = String(payload.name).trim();
   if (payload.location) payload.location = String(payload.location).trim();
+  else delete payload.location;
 
     // Always update timestamps on profile saves
     const now = admin.firestore.FieldValue.serverTimestamp();
@@ -212,6 +239,14 @@ exports.updateUser = async (req, res) => {
     } else if (rawPic === undefined) {
       delete payload.profilePic;
     }
+
+    const normalizedPayload = normalizeUserProfile({ ...(existingData || {}), ...(payload || {}) });
+    payload.firstName = normalizedPayload.firstName || payload.firstName || '';
+    payload.lastName = normalizedPayload.lastName || payload.lastName || '';
+    payload.fullName = normalizedPayload.fullName || payload.fullName || '';
+    payload.displayName = normalizedPayload.displayName || payload.displayName || '';
+    payload.username = normalizedPayload.username || payload.username || '';
+    if (!payload.name && normalizedPayload.fullName) payload.name = normalizedPayload.fullName;
 
     // If still not found, create or merge into the document keyed by incomingId
     if (!snapshot || !snapshot.exists) {
@@ -694,6 +729,7 @@ exports.banUser = async (req, res) => {
 
     const data = doc.data() || {};
     const uid = data.authId || data.uid || data.userId || doc.id;
+    const userEmail = data.email || '';
 
     // Disable Firebase Auth (best-effort)
     let disabledAuth = false;
@@ -707,11 +743,48 @@ exports.banUser = async (req, res) => {
 
     // Update Firestore profile
     const stamp = admin.firestore.FieldValue.serverTimestamp();
-    const payload = { status: 'banned', banned: true, bannedAt: stamp, updatedAt: stamp };
+    const payload = { 
+      status: 'banned', 
+      banned: true, 
+      bannedAt: stamp, 
+      archived: true,
+      archivedAt: stamp,
+      updatedAt: stamp 
+    };
     if (reason) payload.banReason = String(reason);
     await docRef.set(payload, { merge: true });
 
-    res.json({ ok: true, userId: docRef.id, disabledAuth });
+    // Create notification for banned user
+    try {
+      await db.collection('notifications').add({
+        userId: docRef.id,
+        type: 'user_banned',
+        title: '⛔ Your Account Has Been Banned',
+        message: `Your account has been banned. Reason: ${reason || 'Violation of community guidelines'}`,
+        banReason: reason || 'Violation of community guidelines',
+        read: false,
+        createdAt: stamp,
+      });
+    } catch (e) {
+      console.warn('banUser: failed to create notification', e && e.message);
+    }
+
+    // Send email notification
+    try {
+      if (userEmail) {
+        const sendNotificationEmail = require('../config/rtdbHelpers').sendNotificationEmail || ((email, subject, text, html) => Promise.resolve());
+        await sendNotificationEmail(
+          userEmail,
+          '⛔ Account Banned',
+          `Your account has been banned. Reason: ${reason || 'Violation of community guidelines'}\n\nYou will no longer be able to log in.`,
+          `<p>Your account has been <strong style="color:red;">BANNED</strong>.</p><p><strong>Reason:</strong> ${reason || 'Violation of community guidelines'}</p><p>You will no longer be able to log in.</p>`
+        );
+      }
+    } catch (e) {
+      console.warn('banUser: failed to send email', e && e.message);
+    }
+
+    res.json({ ok: true, userId: docRef.id, disabledAuth, banned: true });
   } catch (err) {
     console.error('banUser error', err);
     res.status(500).json({ error: err.message });
@@ -791,6 +864,90 @@ exports.archiveUser = async (req, res) => {
     res.json({ ok: true, userId: resolved.ref.id });
   } catch (err) {
     console.error('archiveUser error', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Admin: unarchive a user profile
+exports.unarchiveUser = async (req, res) => {
+  try {
+    const allowAll = process.env.REPORTS_DEV_ALLOW_ALL === 'true' || process.env.NODE_ENV !== 'production';
+    const isAdmin = !!(req.user && (req.user.isAdmin || req.user.admin || req.user.role === 'admin' || (req.user.roles || []).includes('admin') || (req.user.customClaims && (req.user.customClaims.isAdmin || req.user.customClaims.admin || req.user.customClaims.role === 'admin'))));
+    if (!isAdmin && !allowAll) return res.status(403).json({ error: 'forbidden' });
+
+    const id = String(req.params.id);
+    const usersCol = db.collection('users');
+    let resolved = await findUserDocument(usersCol, id);
+    if (!resolved) return res.status(404).json({ error: 'user_not_found' });
+
+    const stamp = admin.firestore.FieldValue.serverTimestamp();
+    await resolved.ref.set(
+      { archived: false, status: 'active', active: true, updatedAt: stamp },
+      { merge: true }
+    );
+
+    // Re-enable Firebase Auth if it was disabled
+    const uid = resolved.snapshot.data().authId || resolved.snapshot.data().uid || id;
+    try {
+      await admin.auth().updateUser(uid, { disabled: false });
+    } catch (e) {
+      console.warn('unarchiveUser: could not re-enable Firebase Auth user', e && e.message);
+    }
+
+    res.json({ ok: true, userId: resolved.ref.id });
+  } catch (err) {
+    console.error('unarchiveUser error', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Admin: batch set locations for users (testing/setup helper)
+// - Automatically sets default locations for sellers without one
+exports.batchSetLocations = async (req, res) => {
+  try {
+    const allowAll = process.env.REPORTS_DEV_ALLOW_ALL === 'true' || process.env.NODE_ENV !== 'production';
+    const isAdmin = !!(req.user && (req.user.isAdmin || req.user.admin || req.user.role === 'admin' || (req.user.roles || []).includes('admin') || (req.user.customClaims && (req.user.customClaims.isAdmin || req.user.customClaims.admin || req.user.customClaims.role === 'admin'))));
+    if (!isAdmin && !allowAll) return res.status(403).json({ error: 'forbidden' });
+
+    const body = req.body || {};
+    const limit = Math.min(100, parseInt(body.limit || 50, 10));
+    const defaultLocation = body.location || 'Baguio City';
+    
+    // Get all users without a location
+    const usersCol = db.collection('users');
+    const snap = await usersCol.limit(limit).get();
+    
+    let updated = 0;
+    let skipped = 0;
+    const errors = [];
+    const stamp = admin.firestore.FieldValue.serverTimestamp();
+    
+    for (const doc of snap.docs) {
+      const data = doc.data() || {};
+      
+      // Skip if already has location
+      if (data.location) {
+        skipped++;
+        continue;
+      }
+      
+      try {
+        await doc.ref.set({ location: defaultLocation, updatedAt: stamp }, { merge: true });
+        updated++;
+      } catch (err) {
+        errors.push({ userId: doc.id, error: err.message });
+      }
+    }
+    
+    res.json({ 
+      ok: true, 
+      updated, 
+      skipped, 
+      errors,
+      defaultLocation 
+    });
+  } catch (err) {
+    console.error('batchSetLocations error', err);
     res.status(500).json({ error: err.message });
   }
 };

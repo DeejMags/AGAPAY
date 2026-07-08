@@ -52,8 +52,16 @@ function ProfileHeader({ me, onPicChange, menu }) {
       </div>
       <h2 className="mt-4 text-xl font-semibold">{displayName}</h2>
       <div className="text-sm text-gray-600">{me ? me.email : ''}</div>
-      {me && me.phone && <div className="text-sm text-gray-600 mt-1">{me.phone}</div>}
-      {me && me.location && <div className="text-sm text-gray-600 mt-1">{me.location}</div>}
+      {me && me.phone && (
+        <div className="text-sm text-gray-600 mt-1">
+          <span className="font-medium">Phone: </span>{me.phone}
+        </div>
+      )}
+      {me && me.location && (
+        <div className="text-sm text-gray-600 mt-1">
+          <span className="font-medium">Location: </span>{me.location}
+        </div>
+      )}
       {(badgeVisible && displayBadgeTier) && (
         <div className="mt-3 flex items-center gap-2 px-3 py-1 bg-amber-50 border border-amber-200 rounded-full text-sm text-amber-800">
           <span>{getBadgeIcon(displayBadgeTier)}</span>

@@ -34,7 +34,6 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [email,setEmail] = useState('')
-  const [phone,setPhone] = useState('')
   const [password,setPassword] = useState('')
   const [confirm,setConfirm] = useState('')
   const [error,setError] = useState('')
@@ -45,6 +44,8 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
   const [verificationError, setVerificationError] = useState('');
   const [pollCount, setPollCount] = useState(0);
   const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [agreeToTerms, setAgreeToTerms] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
 
 
   function validateAll() {
@@ -53,10 +54,12 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
     if (!lastName.trim()) errs.lastName = 'Last name is required';
     if (!email.trim()) errs.email = 'Email is required';
     else if (!/^\S+@\S+\.\S+$/.test(email)) errs.email = 'Invalid email';
+    else if (email.toLowerCase().includes('spam') || email.toLowerCase().includes('test')) errs.email = 'Please use a valid email address';
   // location removed
     if (!password) errs.password = 'Password is required';
     else if (password.length < 6) errs.password = 'Password must be at least 6 characters';
     if (password !== confirm) errs.confirm = 'Passwords do not match';
+    if (!agreeToTerms) errs.agreeToTerms = 'You must agree to the Terms and Conditions';
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
   }
@@ -75,7 +78,7 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
         password,
         firstName.trim(),
         lastName.trim(),
-        phone
+        ''
       );
 
       // Store profile and auth token
@@ -166,11 +169,35 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
   </div>
   <input value={email} onChange={e=>{ setEmail(e.target.value); onFieldDirty && onFieldDirty(); }} placeholder="Email" className="p-2 border rounded" />
   {fieldErrors.email && <div className="text-red-500 text-sm">{fieldErrors.email}</div>}
-  <input value={phone} onChange={e=>{ setPhone(e.target.value); onFieldDirty && onFieldDirty(); }} placeholder="Phone" className="p-2 border rounded" />
   <input value={password} onChange={e=>{ setPassword(e.target.value); onFieldDirty && onFieldDirty(); }} type="password" placeholder="Password" className="p-2 border rounded" />
   {fieldErrors.password && <div className="text-red-500 text-sm">{fieldErrors.password}</div>}
   <input value={confirm} onChange={e=>{ setConfirm(e.target.value); onFieldDirty && onFieldDirty(); }} type="password" placeholder="Confirm password" className="p-2 border rounded" />
   {fieldErrors.confirm && <div className="text-red-500 text-sm">{fieldErrors.confirm}</div>}
+  
+  {/* Terms & Conditions Checkbox */}
+  <div className="flex items-start gap-2 mt-2">
+    <input 
+      type="checkbox" 
+      id="agreeToTerms" 
+      checked={agreeToTerms} 
+      onChange={e=>setAgreeToTerms(e.target.checked)} 
+      className="mt-1" 
+    />
+    <label htmlFor="agreeToTerms" className="text-sm flex flex-col gap-1">
+      <span>
+        I agree to the{' '}
+        <button 
+          type="button" 
+          onClick={() => setShowTermsModal(true)} 
+          className="text-teal-600 underline hover:text-teal-700"
+        >
+          Terms and Conditions
+        </button>
+      </span>
+      {fieldErrors.agreeToTerms && <div className="text-red-500 text-xs">{fieldErrors.agreeToTerms}</div>}
+    </label>
+  </div>
+
       <button className="p-2 bg-teal-600 text-white rounded" disabled={submitting}>{submitting ? 'Creating...' : 'Create account'}</button>
       <button type="button" className="p-2 bg-red-500 text-white rounded mt-2" onClick={handleGoogleSignup}>
         Sign Up with Google
@@ -243,6 +270,110 @@ export default function SignupForm({ onSuccess, onFieldDirty }){
             {checkingVerification && (
               <p className="mt-3 text-xs text-gray-500">Waiting for verification... we'll redirect you automatically.</p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Terms and Conditions Modal */}
+      {showTermsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowTermsModal(false)}
+          />
+          <div className="relative z-10 mx-4 w-full max-w-2xl rounded-lg bg-white p-6 shadow-xl max-h-[80vh] overflow-y-auto">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-xl font-semibold text-gray-900">Terms and Conditions</h3>
+              <button
+                type="button"
+                aria-label="Close"
+                className="rounded p-1 text-gray-500 hover:bg-gray-100"
+                onClick={() => setShowTermsModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-4 text-sm text-gray-700">
+              <section>
+                <h4 className="font-semibold mb-2">1. Prices and Valuation</h4>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Prices displayed are estimates only based on the submitted weight and material type.</li>
+                  <li>Final valuation is based on actual inspection and weighing of recyclable materials by Imson Junkshop.</li>
+                  <li>The condition, quality, and market price of materials may affect the final value.</li>
+                </ul>
+              </section>
+              
+              <section>
+                <h4 className="font-semibold mb-2">2. Transportation Fees</h4>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Transportation fees may apply for pickup requests depending on location and quantity.</li>
+                  <li>Fees will be deducted from the estimated earnings before payment.</li>
+                  <li>Users will be informed of transportation fees before confirming submission.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h4 className="font-semibold mb-2">3. Material Acceptance</h4>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Imson Junkshop reserves the right to reject unacceptable materials including:</li>
+                  <li className="ml-4">Hazardous chemicals, medical waste, explosives, leaking batteries, flammable materials, and contaminated waste.</li>
+                  <li>Users are responsible for providing accurate information about submitted recyclables.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h4 className="font-semibold mb-2">4. Pickup and Delivery</h4>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Users must provide accurate pickup address, date, and time for pickup requests.</li>
+                  <li>Imson Junkshop will make reasonable efforts to honor scheduled pickups.</li>
+                  <li>Users may also choose to deliver materials directly to the junkshop.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h4 className="font-semibold mb-2">5. Gamification and Rewards</h4>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Points are earned based on the weight of recyclables submitted (10 kg = 1 point).</li>
+                  <li>Badges and levels are unlocked as users accumulate points.</li>
+                  <li>Rewards may be redeemable or used for future transactions as determined by Imson Junkshop.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h4 className="font-semibold mb-2">6. Accuracy of Information</h4>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Users must provide accurate and honest information about recyclable materials.</li>
+                  <li>Misrepresentation of materials may result in rejection or account suspension.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h4 className="font-semibold mb-2">7. Payment Terms</h4>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Payment will be made after final inspection and valuation by Imson Junkshop.</li>
+                  <li>Payment method and timing will be communicated separately.</li>
+                </ul>
+              </section>
+            </div>
+            <div className="mt-6 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setAgreeToTerms(true);
+                  setShowTermsModal(false);
+                }}
+                className="flex-1 rounded bg-teal-600 px-4 py-2 text-white hover:bg-teal-700"
+              >
+                I Agree
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowTermsModal(false)}
+                className="flex-1 rounded border border-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-50"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

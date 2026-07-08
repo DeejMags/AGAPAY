@@ -30,7 +30,8 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
   const [tab, setTab] = useState('all'); // 'all' | 'unread'
   const [items, setItems] = useState([]); // { id, otherId, otherName, otherAvatar, text, ts, unread }
   const [profileCache, setProfileCache] = useState({});
-  const [systemNotifs, setSystemNotifs] = useState([]); // admin system notifications
+  const [systemNotifs, setSystemNotifs] = useState([]); // personal real-time notifications (drop-off approved/completed/declined)
+  const [adminNotifs, setAdminNotifs] = useState([]); // admin-fetched bulk notifications (pending products, reports)
   const [adminSummary, setAdminSummary] = useState({ pendingProducts: 0, openReports: 0 });
   const [loadingAdmin, setLoadingAdmin] = useState(false);
   const [badgeFeed, setBadgeFeed] = useState([]);
@@ -98,59 +99,49 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, meId, profileCache]);
 
-  // Load personal in-app notifications from Firestore (e.g., product approved)
+  // Load personal in-app notifications from Firestore (real-time so drop-off approvals/completions appear instantly)
   useEffect(() => {
-    if (!open || !meId) return;
-    let cancelled = false;
+    if (!meId) return;
+    let unsub = null;
     (async () => {
       try {
         const { db } = await import('../firebase');
-        const { collection, query, where, orderBy, limit, getDocs } = await import('firebase/firestore');
-        const q = query(collection(db, 'notifications'), where('userId', '==', String(meId)), orderBy('createdAt', 'desc'), limit(50));
-        const snap = await getDocs(q);
-        if (cancelled) return;
-        const list = snap.docs.map(d => ({
-          id: `notif:${d.id}`,
-          otherId: d.data().adminId || null,
-          otherName: d.data().adminName || d.data().title || 'Notification',
-          text: d.data().message || '',
-          ts: d.data().createdAt ? (d.data().createdAt.toDate ? d.data().createdAt.toDate().getTime() : Number(d.data().createdAt)) : Date.now(),
-          unread: !d.data().read,
-          icon: '🔔',
-        }));
-        // Merge notifications by prepending so they appear first
-        setSystemNotifs(prev => {
-          // avoid duplicate ids
-          const existingIds = new Set(prev.map(p => p.id));
-          const newOnes = list.filter(l => !existingIds.has(l.id));
-          return [...newOnes, ...prev];
-        });
-        // Backfill admin profiles for notification authors (so avatar/name can be shown)
-        const adminIds = Array.from(new Set(list.map(x => x.otherId).filter(Boolean)));
-        adminIds.forEach(async (aid) => {
-          // try backend first
-          try {
-            const res = await authFetch(`/api/users/${encodeURIComponent(aid)}`);
-            if (res.ok) {
-              const u = await res.json();
-              setProfileCache(prev => (prev[aid] ? prev : ({ ...prev, [aid]: u })));
-              return;
-            }
-          } catch {}
-          // firestore fallback
-          try {
-            const { db } = await import('../firebase');
-            const { doc, getDoc } = await import('firebase/firestore');
-            const snap2 = await getDoc(doc(db, 'users', String(aid)));
-            if (snap2.exists()) setProfileCache(prev => (prev[aid] ? prev : ({ ...prev, [aid]: { id: snap2.id, ...snap2.data() } })));
-          } catch {}
-        });
+        const { collection, query, where, limit, onSnapshot } = await import('firebase/firestore');
+        // Use only a single where() to avoid requiring a composite index
+        const q = query(collection(db, 'notifications'), where('userId', '==', String(meId)), limit(50));
+        unsub = onSnapshot(q, snap => {
+          const list = snap.docs
+            .map(d => {
+              const nd = d.data();
+              const ts = nd.createdAt
+                ? (nd.createdAt.toDate ? nd.createdAt.toDate().getTime() : Number(nd.createdAt))
+                : Date.now();
+              // Pick an icon based on notification type
+              const iconMap = {
+                dropoff_approved: '✅',
+                dropoff_completed: '🏁',
+                dropoff_declined: '❌',
+                dropoff_pending: '📋',
+              };
+              return {
+                id: `notif:${d.id}`,
+                otherId: nd.adminId || null,
+                otherName: nd.title || 'Notification',
+                text: nd.message || '',
+                ts,
+                unread: !nd.read,
+                icon: iconMap[nd.type] || '🔔',
+              };
+            })
+            .sort((a, b) => b.ts - a.ts);
+          setSystemNotifs(list);
+        }, err => { console.warn('notifications listener error:', err.message); });
       } catch (e) {
         // ignore
       }
     })();
-    return () => { cancelled = true; };
-  }, [open, meId]);
+    return () => { if (unsub) unsub(); };
+  }, [meId]);
 
   useEffect(() => {
     if (isAdmin && adminCounts) {
@@ -163,7 +154,7 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
 
   useEffect(() => {
     if (!open || !isAdmin) {
-      setSystemNotifs([]);
+      setAdminNotifs([]);
       setAdminSummary({ pendingProducts: 0, openReports: 0 });
       return;
     }
@@ -231,11 +222,11 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
         }
 
         const combined = [...adminNotifList, ...productNotifs, ...reportNotifs].sort((a,b) => (b.ts || 0) - (a.ts || 0));
-        setSystemNotifs(combined);
+        setAdminNotifs(combined);
         setAdminSummary({ pendingProducts: pendingProducts.length, openReports: openReports.length });
       } catch (err) {
         if (!cancelled) {
-          setSystemNotifs([]);
+          setAdminNotifs([]);
           setAdminSummary({ pendingProducts: 0, openReports: 0 });
         }
       } finally {
@@ -283,17 +274,19 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
     return () => { cancelled = true; };
   }, [open, meId]);
 
-  // Apply tab filtering
+  // Apply tab filtering and sort by timestamp (newest first)
   const filtered = useMemo(() => {
     const enrich = (it) => ({
       ...it,
       otherName: it.otherId && profileCache[it.otherId] ? displayName(profileCache[it.otherId]) : it.otherName,
       otherAvatar: it.otherId && profileCache[it.otherId] ? (profileCache[it.otherId].profilePic || profileCache[it.otherId].avatar || null) : it.otherAvatar,
     });
-    const base = [...badgeFeed, ...systemNotifs, ...items.map(enrich)];
-    if (tab === 'unread') return base.filter(i => i.unread);
-    return base;
-  }, [badgeFeed, items, profileCache, systemNotifs, tab]);
+    const base = [...badgeFeed, ...adminNotifs, ...systemNotifs, ...items.map(enrich)];
+    // Sort ALL notifications by timestamp (newest first)
+    const sorted = base.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    if (tab === 'unread') return sorted.filter(i => i.unread);
+    return sorted;
+  }, [badgeFeed, adminNotifs, items, profileCache, systemNotifs, tab]);
 
   if (!open) return null;
 
@@ -325,12 +318,34 @@ export default function NotificationsPopover({ open, onClose, adminCounts = null
         {filtered.length ? filtered.map(n => (
           <button type="button" key={n.id}
             onClick={() => {
+              // Mark personal notification as read in Firestore (fire-and-forget — don't block navigation)
+              if (n.id && n.id.startsWith('notif:')) {
+                (async () => {
+                  try {
+                    const { db } = await import('../firebase');
+                    const { doc, updateDoc } = await import('firebase/firestore');
+                    await updateDoc(doc(db, 'notifications', n.id.replace('notif:', '')), { read: true });
+                  } catch (_) { /* best-effort — ad-blocker or offline won't break navigation */ }
+                })();
+                // Navigate immediately without waiting for the write
+                localStorage.setItem('seller_dashboard_target_view', 'dropoffs');
+                onClose && onClose();
+                navigate('/dashboard');
+                return;
+              }
+              // Badge notifications → go to profile
+              if (n.id && n.id.startsWith('badge:')) {
+                onClose && onClose();
+                navigate('/profile');
+                return;
+              }
+              // Admin section shortcuts (pending products, reports, admin in-app notifs)
               if (n.targetSection) {
                 onClose && onClose();
                 navigate('/admin', { state: { adminSection: n.targetSection } });
                 return;
               }
-              // When a notification is clicked, open Messages and preselect conversation
+              // Message conversation — n.id is a real conversation ID
               localStorage.setItem('agapay_active_conv', String(n.id));
               onClose && onClose();
               navigate('/messages');

@@ -720,6 +720,7 @@ export default function ImpactReportPanel() {
                 <tr>
                   <th className="px-3 py-2 text-left">Item</th>
                   <th className="px-3 py-2 text-left">Counterparty</th>
+                  <th className="px-3 py-2 text-left">Type</th>
                   <th className="px-3 py-2 text-right">Your Points</th>
                   <th className="px-3 py-2 text-left">Date</th>
                 </tr>
@@ -747,6 +748,7 @@ export default function ImpactReportPanel() {
                 <tr>
                   <th className="px-3 py-2 text-left">Item</th>
                   <th className="px-3 py-2 text-left">Counterparty</th>
+                  <th className="px-3 py-2 text-left">Type</th>
                   <th className="px-3 py-2 text-right">Your Points</th>
                   <th className="px-3 py-2 text-left">Date</th>
                 </tr>
@@ -754,9 +756,13 @@ export default function ImpactReportPanel() {
               <tbody>
                 {filteredHistory.map((h, index) => {
                   const uid = currentUid;
+                  const isDropoff = h?.source === 'dropoff';
                   const isSeller = h && String(h.sellerId || '') === String(uid);
                   const counterpartyId = isSeller ? h.buyerId : h.sellerId;
-                  const counterparty = nameCache[counterpartyId] || counterpartyId || '—';
+                  // For drop-offs, buyerId is null — show junkshop label instead of dashes
+                  const counterparty = isDropoff
+                    ? '\ud83c\udfe1 Junkshop'
+                    : (nameCache[counterpartyId] || counterpartyId || '\u2014');
                   const yourPoints = isSeller ? Number(h.sellerPoints || 0) : Number(h.buyerPoints || 0);
                   const rawUnlocks = isSeller ? h?.sellerBadgeUnlocks : h?.buyerBadgeUnlocks;
                   const isBadgeEquipEvent = !!h?.isBadgeEquipEvent || h?.eventType === 'badge_equip';

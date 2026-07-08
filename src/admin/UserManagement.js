@@ -11,7 +11,6 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
   const [confirmMode, setConfirmMode] = useState(null); // 'ban' | 'delete'
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [banReason, setBanReason] = useState('');
-  const [archiveReason, setArchiveReason] = useState('');
   // Removed typed delete confirmation; immediate delete now
 
   // Toast / notification
@@ -19,25 +18,43 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
   const [notifyText, setNotifyText] = useState('');
   const [notifySuccess, setNotifySuccess] = useState(true);
   // auto-hide handled via effect below
-  
 
-  // Helper to consistently compute a user's display name
-  const getDisplayName = (u) => {
+  // Helper to detect Firebase UID patterns
+  const looksLikeUid = (str) => {
+    if (!str) return false;
+    return /^[a-zA-Z0-9]{20,28}$/.test(String(str).trim());
+  };
+
+  // Helper to get clean display name
+  const getCleanDisplayName = (u) => {
     if (!u) return '';
-    // Prefer real human-readable fields in order: full name, username/displayName, email local-part, phone
-    const combined = [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
-    const preferred = combined || u.fullName || u.name || u.displayName || u.username || null;
-    if (preferred && String(preferred).trim()) return String(preferred).trim();
-    // Fallback to email local-part if present
-    if (u.email) {
-      const local = String(u.email).split('@')[0];
-      if (local && local.trim()) return local.trim();
+    
+    // Try firstName + lastName first
+    const first = (u.firstName || '').trim();
+    const last = (u.lastName || '').trim();
+    const combined = [first, last].filter(Boolean).join(' ').trim();
+    
+    if (combined && !looksLikeUid(combined)) {
+      return combined;
     }
-    // Next prefer phone if available
-    if (u.phone) return String(u.phone).trim();
-    // Last resort: short id fragment
+    
+    // Try other fields
+    const fallbacks = [u.fullName, u.name, u.displayName, u.username]
+      .map(f => String(f || '').trim())
+      .filter(f => f && !looksLikeUid(f));
+    
+    if (fallbacks.length > 0) return fallbacks[0];
+    
+    // Try email local part
+    if (u.email) {
+      const local = String(u.email).split('@')[0].trim();
+      if (local && !looksLikeUid(local)) return local;
+    }
+    
+    // Last resort: show first 12 chars of ID
     return String(u.id || '').slice(0, 12);
   };
+  
 
   useEffect(() => {
     // If parent provided users, use them; otherwise fetch from backend then Firestore
@@ -56,11 +73,14 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
           const res = await authFetch(`/api/users/${encodeURIComponent(u.id)}`);
           if (res && res.ok) {
             const j = await res.json();
+            const combined = [j.firstName, j.lastName].filter(Boolean).join(' ').trim();
             updates[u.id] = {
-              username: j.username || j.displayName || u.username,
-              name: j.name || u.name,
-              displayName: j.displayName || j.username || u.displayName,
-              fullName: j.fullName || u.fullName,
+              firstName: j.firstName || u.firstName || '',
+              lastName: j.lastName || u.lastName || '',
+              username: combined || j.username || j.displayName || u.username,
+              name: j.name || combined || u.name,
+              displayName: combined || j.displayName || j.username || u.displayName,
+              fullName: j.fullName || combined || u.fullName,
               email: j.email || u.email,
             };
           }
@@ -113,10 +133,24 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
     return () => { mounted = false; };
   }, [parentUsers]);
 
+  // Listen for user-unbanned event from AppealsPage
+  useEffect(() => {
+    const handleUserUnbanned = (event) => {
+      const userId = event.detail?.userId;
+      if (userId) {
+        setUsers(prev => prev.map(u => 
+          u.id === userId ? { ...u, status: 'active', banned: false, active: true } : u
+        ));
+      }
+    };
+    window.addEventListener('user-unbanned', handleUserUnbanned);
+    return () => window.removeEventListener('user-unbanned', handleUserUnbanned);
+  }, []);
+
   const filtered = users.filter(u => {
     const q = search.toLowerCase();
     return (
-      (getDisplayName(u) || '').toLowerCase().includes(q) ||
+      (getCleanDisplayName(u) || '').toLowerCase().includes(q) ||
       (u.email || '').toLowerCase().includes(q) ||
       String(u.id || '').toLowerCase().includes(q)
     );
@@ -158,46 +192,6 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
       setNotifyText('User deleted'); setNotifySuccess(true); setNotifyOpen(true);
     } else {
       setNotifyText('Failed to delete user'); setNotifySuccess(false); setNotifyOpen(true);
-    }
-  }
-
-  // Non-destructive archive: mark profile as archived instead of deleting
-  async function handleArchive(id, reason) {
-    const stringId = typeof id === 'string' ? id : String(id);
-    let archived = false;
-    try {
-      const res = await authFetch(`/api/users/${encodeURIComponent(stringId)}/archive`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason || null })
-      });
-      if (!res.ok) throw new Error('Backend archive failed');
-      archived = true;
-    } catch (err) {
-      try {
-        await updateDoc(doc(db, 'users', stringId), { archived: true, status: 'archived', archivedAt: serverTimestamp(), active: false, archiveReason: reason || '' });
-        archived = true;
-      } catch (e) {
-        console.error('Archive fallback failed', e);
-        archived = false;
-      }
-    }
-
-    // write admin log
-    try {
-      const adminUser = JSON.parse(localStorage.getItem('user') || 'null');
-      const adminId = (adminUser && (adminUser.id || adminUser.authId)) || (auth && auth.currentUser && auth.currentUser.uid) || null;
-      await addDoc(collection(db, 'admin_logs'), { action: 'archive_user', targetId: stringId, adminId, timestamp: serverTimestamp(), success: archived });
-    } catch (e) {
-      console.warn('Failed to write admin log for archive', e);
-    }
-
-    if (archived) {
-      const applyArchived = (u) => u.id === stringId ? { ...u, archived: true, status: 'archived', active: false } : u;
-      setUsers(prev => prev.map(applyArchived));
-      if (setParentUsers) setParentUsers(prev => prev.map(applyArchived));
-      setNotifyText('User archived'); setNotifySuccess(true); setNotifyOpen(true);
-      try { window.dispatchEvent(new Event('navigate-archive')); } catch (_) {}
-    } else {
-      setNotifyText('Failed to archive user'); setNotifySuccess(false); setNotifyOpen(true);
     }
   }
 
@@ -261,13 +255,6 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
     setConfirmMode('ban');
     setConfirmTarget(id);
     setBanReason('');
-    setConfirmOpen(true);
-  }
-
-  function openArchiveConfirm(id) {
-    setConfirmMode('archive');
-    setConfirmTarget(id);
-    setArchiveReason('');
     setConfirmOpen(true);
   }
 
@@ -351,7 +338,6 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
               <tr className="bg-teal-100 text-teal-700">
                 <th className="p-3 text-left first:rounded-tl-xl">Name</th>
                 <th className="p-3 text-left">Email</th>
-                <th className="p-3 text-left">Phone</th>
                 <th className="p-3 text-left last:rounded-tr-xl">Actions</th>
               </tr>
             </thead>
@@ -359,59 +345,42 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
               {filtered.map(u => (
                 <tr key={u.id} className="bg-white">
                   <td className="p-3 align-top">
-                    <div className="font-medium">{getDisplayName(u) || '—'}</div>
+                    <div className="font-medium">{getCleanDisplayName(u) || '—'}</div>
                     <code className="text-xs text-gray-500 break-all font-mono select-all" title={String(u.id || '')}>{u.id}</code>
                   </td>
-                  <td className="p-3 align-top">{u.email || '—'}</td>
-                  <td className="p-3 align-top">{u.phone || '—'}</td>
+                  <td className="p-3 align-top whitespace-nowrap">{u.email || '—'}</td>
                   <td className="p-3 align-top">
                     <div className="flex items-center gap-2 whitespace-nowrap">
                       {(() => {
                         const status = String(u.status || '').toLowerCase();
                         const isBanned = u.banned === true || status === 'banned' || status.includes('ban') || (u.active === false && status !== 'active');
-                        if (isBanned) {
-                          return (
-                            <>
-                              <span className="px-2 py-1 rounded bg-red-100 text-red-700 font-medium">Banned</span>
-                              <button
-                                className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 transition"
-                                onClick={() => { setConfirmMode('unban'); setConfirmTarget(u.id); setConfirmOpen(true); }}
-                                aria-label={`Unban ${getDisplayName(u) || u.id}`}>
-                                Unban
-                              </button>
-                              <button
-                                className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition"
-                                onClick={() => openArchiveConfirm(u.id)}
-                                aria-label={`Archive ${getDisplayName(u) || u.id}`}>
-                                Archive
-                              </button>
-                              <button
-                                className="px-2 py-1 bg-orange-600 text-white rounded hover:bg-orange-700 transition"
-                                onClick={() => openPermanentDeleteConfirm(u.id)}
-                                aria-label={`Permanently delete ${getDisplayName(u) || u.id}`}>
-                                Delete
-                              </button>
-                            </>
-                          );
-                        }
                         return (
                           <>
+                            {/* Hide ban/unban for admin-role users */}
+                            {u.role !== 'admin' && (
+                              <button
+                                className={`px-3 py-1 rounded text-white text-sm font-medium transition ${
+                                  isBanned
+                                    ? 'bg-green-600 hover:bg-green-700'
+                                    : 'bg-red-600 hover:bg-red-700'
+                                }`}
+                                onClick={() => {
+                                  if (isBanned) {
+                                    setConfirmMode('unban'); setConfirmTarget(u.id); setConfirmOpen(true);
+                                  } else {
+                                    openBanConfirm(u.id);
+                                  }
+                                }}
+                                aria-label={isBanned ? `Unban ${getCleanDisplayName(u) || u.id}` : `Ban ${getCleanDisplayName(u) || u.id}`}
+                              >
+                                {isBanned ? 'Unban' : 'Ban'}
+                              </button>
+                            )}
                             <button
-                              className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition"
-                              onClick={() => openBanConfirm(u.id)}
-                              aria-label={`Ban ${getDisplayName(u) || u.id}`}>
-                              Ban
-                            </button>
-                            <button
-                              className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition"
-                              onClick={() => openArchiveConfirm(u.id)}
-                              aria-label={`Archive ${getDisplayName(u) || u.id}`}>
-                              Archive
-                            </button>
-                            <button
-                              className="px-2 py-1 bg-orange-600 text-white rounded hover:bg-orange-700 transition"
+                              className="px-2 py-1 bg-orange-600 text-white rounded hover:bg-orange-700 transition text-sm"
                               onClick={() => openPermanentDeleteConfirm(u.id)}
-                              aria-label={`Permanently delete ${getDisplayName(u) || u.id}`}>
+                              aria-label={`Permanently delete ${getCleanDisplayName(u) || u.id}`}
+                            >
                               Delete
                             </button>
                           </>
@@ -429,8 +398,8 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
       {/* Ban confirmation modal */}
       <Modal
         open={confirmOpen && !!confirmTarget}
-        title={confirmMode === 'archive' ? 'Confirm archive' : (confirmMode === 'permanentDelete' ? 'Confirm permanent delete' : (confirmMode === 'unban' ? 'Confirm unban' : 'Confirm ban'))}
-      onCancel={() => { setConfirmOpen(false); setConfirmTarget(null); setConfirmMode(null); setBanReason(''); setArchiveReason(''); }}
+        title={confirmMode === 'permanentDelete' ? 'Confirm permanent delete' : (confirmMode === 'unban' ? 'Confirm unban' : 'Confirm ban')}
+        onCancel={() => { setConfirmOpen(false); setConfirmTarget(null); setConfirmMode(null); setBanReason(''); }}
         onConfirm={async () => {
           const id = confirmTarget;
           const mode = confirmMode;
@@ -444,8 +413,6 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
             if (mode === 'ban') {
               // handleBan returns a closure — call it with the reason
               await handleBan(id)(banReason || 'Banned by admin');
-            } else if (mode === 'archive') {
-              await handleArchive(id, archiveReason || null);
             } else if (mode === 'permanentDelete') {
               await handleDelete(id);
             } else if (mode === 'unban') {
@@ -455,8 +422,8 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
             setConfirmLoading(false);
           }
         }}
-        confirmLabel={confirmMode === 'archive' ? 'Archive user' : (confirmMode === 'permanentDelete' ? 'Delete permanently' : (confirmMode === 'unban' ? 'Unban user' : 'Ban user'))}
-        confirmDanger={confirmMode === 'archive' || confirmMode === 'permanentDelete'}
+        confirmLabel={confirmMode === 'permanentDelete' ? 'Delete permanently' : (confirmMode === 'unban' ? 'Unban user' : 'Ban user')}
+        confirmDanger={confirmMode === 'permanentDelete'}
         confirmLoading={confirmLoading}
       >
         {(() => {
@@ -475,17 +442,6 @@ export default function UserManagement({ users: parentUsers, setUsers: setParent
                 </ul>
                 <div className="text-sm text-gray-600 mt-2">This action <strong>cannot be recovered</strong>.</div>
               </div>
-            );
-          }
-          if (confirmMode === 'archive') {
-            return (
-              <>
-                <div className="mb-2">You are about to archive <strong>{displayName}</strong>. This will preserve their profile for history but mark it archived.</div>
-                <div className="mb-2">
-                  <label className="block text-sm font-medium text-gray-700">Archive reason (optional)</label>
-                  <textarea value={archiveReason} onChange={e=>setArchiveReason(e.target.value)} className="w-full border rounded p-2 mt-1" rows={3} />
-                </div>
-              </>
             );
           }
           if (confirmMode === 'ban') {

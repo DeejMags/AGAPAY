@@ -1,6 +1,6 @@
 if (process.env.DISABLE_FIREBASE === 'true') {
   console.log('Firebase Admin is disabled via DISABLE_FIREBASE=true');
-  module.exports = { admin: null, db: null };
+  module.exports = { admin: null, db: null, rtdb: null };
 } else {
   const admin = require('firebase-admin');
 
@@ -38,11 +38,23 @@ if (process.env.DISABLE_FIREBASE === 'true') {
 
   if (!admin.apps.length) {
     const bucketName = process.env.FIREBASE_STORAGE_BUCKET || (projectIdForBucket ? `${projectIdForBucket}.appspot.com` : undefined);
+    const databaseURL = process.env.FIREBASE_DATABASE_URL;
     const initConfig = { credential };
     if (bucketName) initConfig.storageBucket = bucketName;
+    if (databaseURL) initConfig.databaseURL = databaseURL;
     admin.initializeApp(initConfig);
   }
 
+  // Support both Firestore and Realtime Database
   const db = admin.firestore();
-  module.exports = { admin, db };
+  let rtdb = null;
+  try {
+    if (process.env.FIREBASE_DATABASE_URL) {
+      rtdb = admin.database();
+    }
+  } catch (e) {
+    console.warn('Realtime Database not available (no FIREBASE_DATABASE_URL):', e.message);
+  }
+  
+  module.exports = { admin, db, rtdb };
 }

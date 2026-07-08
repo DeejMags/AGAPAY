@@ -1,8 +1,8 @@
 const BADGE_THRESHOLDS = [
-  { tier: 'bronze', label: 'Bronze', minPoints: 10, description: 'Earn 10 points to unlock the Bronze badge.' },
-  { tier: 'silver', label: 'Silver', minPoints: 50000, description: 'Earn 50,000 points to unlock the Silver badge.' },
-  { tier: 'gold', label: 'Gold', minPoints: 1000000, description: 'Earn 1,000,000 points to unlock the Gold badge.' },
-  { tier: 'green', label: 'Green', minPoints: 100000000, description: 'Earn 100,000,000 points to unlock the Green badge.' },
+  { tier: 'bronze', label: 'Bronze', minPoints: 100, description: 'Earn 100 points to unlock the Bronze badge.' },
+  { tier: 'silver', label: 'Silver', minPoints: 1000, description: 'Earn 1,000 points to unlock the Silver badge.' },
+  { tier: 'gold', label: 'Gold', minPoints: 10000, description: 'Earn 10,000 points to unlock the Gold badge.' },
+  { tier: 'green', label: 'Green', minPoints: 100000, description: 'Earn 100,000 points to unlock the Green badge.' },
 ];
 
 const BADGE_ORDER = BADGE_THRESHOLDS.map(b => b.tier);

@@ -24,13 +24,19 @@ export default function ListingsPanel({ listings, onEdit, onDelete, onView, onSt
           return '';
         })();
         return (
-          <div key={id} className="bg-white rounded-lg shadow p-4 flex flex-col">
+          <div key={id} className={`bg-white rounded-lg shadow p-4 flex flex-col relative ${status === 'sold' ? 'opacity-80' : ''}`}>
+            {/* SOLD overlay banner */}
+            {status === 'sold' && (
+              <div className="absolute top-2 left-2 right-2 z-10 bg-green-600 text-white text-center text-xs font-bold py-1 rounded shadow">
+                ✓ SOLD
+              </div>
+            )}
             {/* Image */}
             <div className="w-full h-40 mb-3 bg-gray-100 rounded overflow-hidden flex items-center justify-center">
               <img src={
                   item.imageUrl || (Array.isArray(item.photo) && item.photo[0]) || item.photo || item.image || 'https://via.placeholder.com/400x300'}
                 alt={item.title || 'product'}
-                className="w-full h-full object-cover"
+                className={`w-full h-full object-cover ${status === 'sold' ? 'grayscale' : ''}`}
               />
             </div>
             <div className="font-semibold mb-1 truncate">{item.title}</div>
@@ -52,7 +58,9 @@ export default function ListingsPanel({ listings, onEdit, onDelete, onView, onSt
               <div className="flex items-center gap-2">
                 <button disabled={disabled} className={`px-3 py-1.5 text-xs rounded text-white ${disabled ? 'bg-teal-300 cursor-not-allowed' : 'bg-teal-600 hover:bg-teal-700'}`} onClick={()=>!disabled && onView(item)}>View</button>
                 <button disabled={disabled} className={`px-3 py-1.5 text-xs rounded text-white ${disabled ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`} onClick={()=>!disabled && onEdit(item)}>Edit</button>
-                <button disabled={disabled} className={`px-3 py-1.5 text-xs rounded text-white ${disabled ? 'bg-red-300 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'}`} onClick={()=>!disabled && onDelete(id)}>Delete</button>
+                {status !== 'sold' && (
+                  <button disabled={disabled} className={`px-3 py-1.5 text-xs rounded text-white ${disabled ? 'bg-red-300 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'}`} onClick={()=>!disabled && onDelete(id)}>Delete</button>
+                )}
               </div>
 
               {(() => {

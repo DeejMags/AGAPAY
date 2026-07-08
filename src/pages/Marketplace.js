@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 // ...existing code...
 import { useLocation } from 'react-router-dom'
 import ProductCard from '../components/ProductCard'
+import BanNotificationModal from '../components/BanNotificationModal'
 import { db } from '../firebase'
 import { collection, getDocs } from 'firebase/firestore'
 // ...existing code...
@@ -28,6 +29,8 @@ export default function Marketplace(){
   const params = new URLSearchParams(locationHook.search);
   const searchQuery = params.get('search') || '';
   const [products, setProducts] = useState([])
+  const [showBanModal, setShowBanModal] = useState(false);
+  const [banInfo, setBanInfo] = useState({ reason: '', userName: '' });
   // main filter state
   // Remove local search state, use query from URL
   const [category, setCategory] = useState('')
@@ -43,6 +46,37 @@ export default function Marketplace(){
   const [sidebarDelivery, setSidebarDelivery] = useState(false)
   const [sidebarPickup, setSidebarPickup] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false) // Mobile sidebar state
+
+  // Check if current user is banned
+  useEffect(() => {
+    let cancelled = false;
+    async function checkUserBan() {
+      try {
+        const user = JSON.parse(localStorage.getItem('user') || 'null');
+        if (!user || !user.id) return;
+        
+        const res = await fetch(`/api/users/${encodeURIComponent(user.id)}`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        if (res.ok) {
+          const profile = await res.json();
+          if (profile.banned || profile.status === 'banned') {
+            if (!cancelled) {
+              setBanInfo({
+                reason: profile.banReason || 'Violation of community guidelines',
+                userName: profile.fullName || profile.name || profile.displayName || profile.username || ''
+              });
+              setShowBanModal(true);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to check user ban status:', e);
+      }
+    }
+    checkUserBan();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,6 +111,7 @@ export default function Marketplace(){
     const effectiveCategory = normalize(category) || mapSearchToCategory(searchQuery);
     let res = products.filter(p=>{
       if(p.status && p.status !== 'active') return false;
+      if(p.dropoffJunkshop) return false; // Exclude drop-off items from marketplace
       if (searchQuery) {
         const tq = searchQuery.toLowerCase();
         const titleOk = (p.title || '').toLowerCase().includes(tq);
@@ -120,6 +155,8 @@ export default function Marketplace(){
   // ...existing code...
 
   return (
+    <div className="relative">
+      <BanNotificationModal isOpen={showBanModal} banReason={banInfo.reason} userName={banInfo.userName} />
     <div className="py-6 md:py-8">
       <div className="container mx-auto px-2 md:px-4">
         {/* categories pill bar */}
@@ -278,6 +315,7 @@ export default function Marketplace(){
           </div>
         </div>
       </div>
+    </div>
     </div>
   )
 }

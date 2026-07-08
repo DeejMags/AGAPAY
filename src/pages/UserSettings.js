@@ -180,7 +180,7 @@ export default function UserSettings() {
           {isEditing ? (
             <input
               type="tel"
-              placeholder="Phone Number*"
+              placeholder="Phone Number (optional)"
               value={profile.phone}
               onChange={(e) => setProfile((p) => ({ ...p, phone: e.target.value }))}
               className="border rounded p-2"
@@ -218,8 +218,8 @@ export default function UserSettings() {
                   type="button"
                   className="px-4 py-2 bg-teal-600 text-white rounded"
                   onClick={async () => {
-                    if (!profile.name || !profile.email || !profile.phone || !profile.location) {
-                      setSaveStatus('Please fill in all required fields.');
+                    if (!profile.name || !profile.email || !profile.location) {
+                      setSaveStatus('Please fill in your name, email, and location.');
                       setTimeout(() => setSaveStatus(''), 2000);
                       return;
                     }

@@ -33,17 +33,20 @@ export async function checkEmailExists(email) {
  */
 async function createUserProfile(uid, email, firstName, lastName, phone, role = 'user') {
   try {
-    const fullName = `${firstName} ${lastName}`.trim();
+    // Trim and capitalize names properly
+    const cleanFirstName = (firstName || '').trim();
+    const cleanLastName = (lastName || '').trim();
+    const fullName = `${cleanFirstName} ${cleanLastName}`.trim();
     const normalizedEmail = email.trim().toLowerCase();
     
     const profileData = {
       authId: uid,
       email: normalizedEmail,
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      fullName,
-      username: fullName,
-      displayName: fullName,
+      firstName: cleanFirstName || 'User',
+      lastName: cleanLastName,
+      fullName: fullName || cleanFirstName || 'User',
+      username: fullName || cleanFirstName || 'User',
+      displayName: fullName || cleanFirstName || 'User',
       phone: phone || '',
       role,
       status: 'Active',
@@ -126,11 +129,19 @@ export function getBanReason(userProfile) {
   
   const fields = ['banReason', 'reason', 'ban_reason', 'ban_reason_description', 'description', 'message', 'disabledReason', 'statusMessage', 'note', 'status_reason'];
   for (const field of fields) {
-    if (userProfile[field]) return String(userProfile[field]);
+    if (userProfile[field]) {
+      const val = String(userProfile[field]);
+      // Skip raw Firebase technical error strings that got stored accidentally
+      if (val.startsWith('Firebase:') || val.includes('auth/user-disabled')) continue;
+      return val;
+    }
   }
   
-  if (userProfile.status && String(userProfile.status).toLowerCase().includes('ban')) {
-    return String(userProfile.status);
+  if (userProfile.status) {
+    const s = String(userProfile.status);
+    if (s.toLowerCase().includes('ban') && !s.startsWith('Firebase:') && !s.includes('auth/')) {
+      return s;
+    }
   }
   
   return '';
@@ -213,7 +224,12 @@ export async function loginWithEmail(email, password) {
     if (isUserBanned(profile)) {
       await signOut(auth);
       const reason = getBanReason(profile);
-      throw new Error(`User is banned${reason ? ': ' + reason : ''}`);
+      const banErr = new Error(`User is banned${reason ? ': ' + reason : ''}`);
+      banErr.banReason = reason || '';
+      banErr.bannedUserId = profile.id || '';
+      banErr.userEmail = profile.email || '';
+      banErr.userName = profile.fullName || profile.name || profile.username || profile.displayName || '';
+      throw banErr;
     }
 
     // Check if admin
@@ -222,6 +238,27 @@ export async function loginWithEmail(email, password) {
     return { user, profile, isAdmin, emailVerified: user.emailVerified };
   } catch (err) {
     console.error('Login error:', err);
+    // auth/user-disabled means the account was disabled via Firebase Admin (ban)
+    // Look up the Firestore profile to surface the ban reason to the UI
+    if (err.code === 'auth/user-disabled') {
+      try {
+        const profile = await getUserProfileByEmail(email.trim().toLowerCase());
+        if (profile) {
+          const reason = getBanReason(profile);
+          const banErr = new Error(`User is banned${reason ? ': ' + reason : ''}`);
+          banErr.banReason = reason || '';
+          banErr.bannedUserId = profile.id || '';
+          banErr.userEmail = profile.email || '';
+          banErr.userName = profile.fullName || profile.name || profile.username || profile.displayName || '';
+          throw banErr;
+        }
+      } catch (innerErr) {
+        if (innerErr.message && innerErr.message.includes('banned')) throw innerErr;
+      }
+      const banErr = new Error('User is banned: Your account has been suspended by an administrator.');
+      banErr.banReason = '';
+      throw banErr;
+    }
     throw err;
   }
 }
@@ -240,7 +277,9 @@ export async function signInWithGoogle() {
 
     if (!profile) {
       // New user - create profile
-      const nameParts = (user.displayName || '').split(' ');
+      // Split Google display name into first and last name
+      const displayName = (user.displayName || 'User').trim();
+      const nameParts = displayName.split(/\s+/).filter(Boolean); // Split on any whitespace, remove empty parts
       const firstName = nameParts[0] || 'User';
       const lastName = nameParts.slice(1).join(' ') || '';
       
@@ -259,7 +298,12 @@ export async function signInWithGoogle() {
     if (isUserBanned(profile)) {
       await signOut(auth);
       const reason = getBanReason(profile);
-      throw new Error(`User is banned${reason ? ': ' + reason : ''}`);
+      const banErr = new Error(`User is banned${reason ? ': ' + reason : ''}`);
+      banErr.banReason = reason || '';
+      banErr.bannedUserId = profile.id || '';
+      banErr.userEmail = profile.email || '';
+      banErr.userName = profile.fullName || profile.name || profile.username || profile.displayName || '';
+      throw banErr;
     }
 
     // Check if admin

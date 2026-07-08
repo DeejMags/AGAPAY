@@ -3,12 +3,12 @@ import { auth } from '../firebase';
 import authFetch from '../utils/authFetch';
 import { getUserConversations } from '../firebaseMessageService';
 
-// Minimal modal UI for picking buyer from your conversations and submitting a sale + review
+// Modal for picking buyer from conversations and confirming a sale
 export default function MarkSoldModal({ open, onClose, product, onMarked }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [buyerId, setBuyerId] = useState('');
-  const [candidates, setCandidates] = useState([]); // [{ id, name }]
+  const [candidates, setCandidates] = useState([]);
 
   const me = useMemo(() => (auth && auth.currentUser && auth.currentUser.uid) || null, []);
 
@@ -56,8 +56,8 @@ export default function MarkSoldModal({ open, onClose, product, onMarked }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
-  if (!product) return;
-  if (!buyerId) { setError('Please choose a buyer'); return; }
+    if (!product) return;
+    if (!buyerId) { setError('Please choose a buyer'); return; }
     setLoading(true);
     setError('');
     try {
@@ -78,10 +78,10 @@ export default function MarkSoldModal({ open, onClose, product, onMarked }) {
           sellerPoints: Number(json.sellerPoints) || 0,
           buyerPoints: Number(json.buyerPoints) || 0,
           alreadyAwarded: !!json.alreadyAwarded,
-          badgeUpdates: json.badgeUpdates || null,
           badgeNotifications: json.badgeNotifications || null,
         });
       }
+      // Close the modal — the listing card shows the SOLD badge as the persistent indicator
       onClose && onClose();
     } catch (e) {
       setError(e.message || 'Failed to complete sale');

@@ -7,6 +7,7 @@ import QuickMessagesButton from './QuickMessagesButton';
 import useUnreadMessages from './useUnreadMessages';
 import NotificationsPopover from './NotificationsPopover';
 import authFetch from '../utils/authFetch';
+import BanNotificationModal from './BanNotificationModal';
 
 function getStoredUser() {
   try {
@@ -33,7 +34,10 @@ export default function Navbar(){
 
   const [notifOpen, setNotifOpen] = useState(false)
   const [adminCounts, setAdminCounts] = useState({ pendingProducts: 0, openReports: 0, adminNotifications: 0 })
+  const [showBanModal, setShowBanModal] = useState(false)
+  const [banInfo, setBanInfo] = useState({ reason: '', userName: '' })
   const mountedRef = useRef(true)
+  const banUnsubRef = useRef(null)
   const isAdmin = user && user.role === 'admin'
 
   useEffect(() => {
@@ -128,9 +132,62 @@ export default function Navbar(){
     };
   }, []);
 
+  // Real-time ban detection: listen to the current user's Firestore document.
+  // Fires on any page where Navbar is mounted, so the ban modal appears immediately.
+  useEffect(() => {
+    // Clean up any previous listener before re-subscribing
+    if (banUnsubRef.current) {
+      banUnsubRef.current();
+      banUnsubRef.current = null;
+    }
+
+    const userId = userData && userData.id;
+    if (!userId || (userData && userData.role === 'admin')) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const { db } = await import('../firebase');
+        const { doc, onSnapshot } = await import('firebase/firestore');
+        if (cancelled) return;
+        const unsubscribe = onSnapshot(doc(db, 'users', userId), (snap) => {
+          if (!snap.exists() || !mountedRef.current) return;
+          const data = snap.data();
+          if (data.banned === true || (data.status || '').toLowerCase() === 'banned') {
+            setBanInfo({
+              reason: data.banReason || 'Violation of community guidelines',
+              userName: data.firstName
+                ? `${data.firstName} ${data.lastName || ''}`.trim()
+                : (data.displayName || data.username || (userData && userData.username) || '')
+            });
+            setShowBanModal(true);
+          }
+        });
+        banUnsubRef.current = unsubscribe;
+      } catch (e) {
+        console.warn('Ban listener setup failed:', e.message);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (banUnsubRef.current) {
+        banUnsubRef.current();
+        banUnsubRef.current = null;
+      }
+    };
+  }, [userData?.id, userData?.role]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function handleLogout(){
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
+    // Clear all app-related localStorage keys to prevent data leaking to next user
+    const keysToRemove = ['token','user','currentSeller','agapay_users','admin','cart'];
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+    // Sign out of Firebase Auth
+    try {
+      import('../firebase').then(({ auth: firebaseAuth }) => {
+        if (firebaseAuth && firebaseAuth.signOut) firebaseAuth.signOut();
+      }).catch(() => {});
+    } catch (e) { /* ignore */ }
     window.dispatchEvent(new Event('agapay:user-update'));
     setUserData(null)
     navigate('/')
@@ -392,6 +449,8 @@ export default function Navbar(){
         navigate('/admin');
       }
     }} />
+  {/* Ban notification modal — shown from any page when admin bans this user */}
+  <BanNotificationModal isOpen={showBanModal} banReason={banInfo.reason} userName={banInfo.userName} />
       {/* Removed notification and points from sidebar as requested */}
     </>
   )

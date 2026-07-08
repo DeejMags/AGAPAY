@@ -10,6 +10,13 @@ function makeChatId(a,b){
   return [a,b].sort().join('_')
 }
 
+// Check if a string looks like a Firebase UID (alphanumeric, 20-28 chars)
+function looksLikeUid(str) {
+  if (!str || typeof str !== 'string') return false;
+  return /^[a-zA-Z0-9]{20,28}$/.test(String(str).trim());
+}
+
+
 export default function Messages(){
   const navigate = useNavigate();
   const [conversations, setConversations] = useState([]) // list of { chatId, title, otherId, otherName, otherAvatar, lastMessage }
@@ -22,6 +29,7 @@ export default function Messages(){
   const [userNotFound, setUserNotFound] = useState({}) // id -> true if 404 or unavailable
   const [showActions, setShowActions] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const actionsRef = useRef(null)
   const listRef = useRef()
   
 
@@ -137,15 +145,34 @@ export default function Messages(){
     }
   }, [resolveUserProfile]);
 
+  // When conversations update, immediately resolve any missing names in parallel
+  useEffect(() => {
+    conversations
+      .filter(c => !c.otherName && c.otherId && !String(c.otherId).startsWith('seller_'))
+      .forEach(c => resolveUserProfile(c.otherId).catch(() => {}));
+  }, [conversations, resolveUserProfile]);
+
+  // When conversations update, immediately resolve any missing names in parallel
+  useEffect(() => {
+    conversations
+      .filter(c => !c.otherName && c.otherId && !String(c.otherId).startsWith('seller_'))
+      .forEach(c => resolveUserProfile(c.otherId).catch(() => {}));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations]);
+
   function displayName(u) {
     if (!u) return '';
-    return (
-      u.username
+    const combined = [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
+    const result = (
+      combined
+      || u.fullName
       || u.displayName
       || u.name
-      || u.fullName
+      || u.username
       || (u.email ? String(u.email).split('@')[0] : '')
     );
+    // Safe fallback: never return a Firebase UID or empty string that looks like one
+    return result && result.trim() && !/^[a-zA-Z0-9]{20,}$/.test(result) ? result : '';
   }
 
   useEffect(()=>{
@@ -174,7 +201,15 @@ export default function Messages(){
           const enriched = json.map(c => {
             const otherId = c.otherId || (c.participants && c.participants.map(String).find(p => p !== myIdStr)) || null;
             const cached = otherId ? userCache[otherId] : null;
-            const name = c.otherName || displayName(cached);
+            // Priority: backend-provided name (fresh firstName+lastName) > cached > displayName helper
+            let name = '';
+            if (c.otherName && c.otherName.trim() && !looksLikeUid(c.otherName)) {
+              name = c.otherName.trim();
+            } else if (cached && cached.firstName && cached.lastName) {
+              name = [cached.firstName, cached.lastName].filter(Boolean).join(' ').trim();
+            } else if (cached) {
+              name = displayName(cached) || '';
+            }
             const avatar = c.otherAvatar || (cached ? (cached.profilePic || cached.avatar || null) : null);
             return { chatId: c.conversationId, otherId, otherName: name, otherAvatar: avatar, lastMessage: c.lastMessage, unread: (c.unreadCount || 0) > 0 };
           });
@@ -194,7 +229,14 @@ export default function Messages(){
               const enriched = json.map(c => {
                 const otherId = c.otherId || (c.participants && c.participants.map(String).find(p => p !== myIdStr)) || null;
                 const cached = otherId ? userCache[otherId] : null;
-                const name = c.otherName || displayName(cached);
+                let name = '';
+                if (c.otherName && c.otherName.trim() && !looksLikeUid(c.otherName)) {
+                  name = c.otherName.trim();
+                } else if (cached && cached.firstName && cached.lastName) {
+                  name = [cached.firstName, cached.lastName].filter(Boolean).join(' ').trim();
+                } else if (cached) {
+                  name = displayName(cached) || '';
+                }
                 const avatar = c.otherAvatar || (cached ? (cached.profilePic || cached.avatar || null) : null);
                 return { chatId: c.conversationId, otherId, otherName: name, otherAvatar: avatar, lastMessage: c.lastMessage, unread: (c.unreadCount || 0) > 0 };
               });
@@ -469,9 +511,9 @@ export default function Messages(){
       <div className="flex items-center justify-between mb-4 md:mb-6">
         <h1 className="text-xl md:text-2xl font-bold">Messages</h1>
       </div>
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4 md:gap-6 h-[calc(100vh-200px)] md:h-auto">
-        {/* Sidebar - hidden on mobile, visible on desktop */}
-        <div className="hidden md:block md:col-span-1">
+      <div className="mt-4 flex flex-col md:grid md:grid-cols-4 md:gap-6" style={{minHeight: '70vh'}}>
+        {/* Sidebar: full width on mobile when no chat selected, col-span-1 on desktop */}
+        <div className={`md:col-span-1 ${selectedChat ? 'hidden md:block' : 'block'}`}>
           <div>
             <div className="static bg-gradient-to-r from-teal-500 to-teal-400 rounded-t-xl px-4 py-3 md:py-4 flex items-center gap-2 shadow-sm">
               <div className="relative flex items-center gap-2">
@@ -493,7 +535,7 @@ export default function Messages(){
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className={`font-semibold truncate text-sm md:text-base ${selectedChat===c.chatId ? 'text-blue-700' : 'text-gray-800'}`}>
-                    {c.otherName || displayName(userCache[c.otherId]) || 'Loading…'}
+                    {c.otherName || displayName(userCache[c.otherId]) || String(c.otherId || '').slice(0, 10) || 'User'}
                   </div>
                   <div className="text-xs text-gray-500 truncate">
                     {(() => {
@@ -521,12 +563,20 @@ export default function Messages(){
           </div>
         </div>
 
-        {/* Chat Area */}
-        <div className="col-span-1 md:col-span-3 flex flex-col">
+        {/* Chat Area: full width on mobile when chat selected */}
+        <div className={`md:col-span-3 flex flex-col ${selectedChat ? 'block' : 'hidden md:flex'}`}>
           {selectedChat ? (
             <div className="flex flex-col gap-3 md:gap-4 bg-white rounded-xl shadow p-3 md:p-6 border h-full">
               <div className="flex items-center justify-between pb-3 border-b">
                 <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
+                  {/* Back button on mobile */}
+                  <button
+                    className="md:hidden p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 flex-shrink-0"
+                    onClick={() => setSelectedChat(null)}
+                    aria-label="Back to conversations"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                  </button>
                   <div className="w-10 md:w-12 h-10 md:h-12 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center flex-shrink-0">
                     {/* avatar placeholder */}
                   </div>
@@ -534,11 +584,11 @@ export default function Messages(){
                     {(() => {
                       const conv = conversations.find(x => x.chatId === selectedChat);
                       const nm = conv?.otherName || displayName(userCache[conv?.otherId]) || '';
-                      return nm || 'Chat';
+                      return nm || String(conv?.otherId || '').slice(0, 10) || 'User';
                     })()}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="relative flex items-center gap-2 flex-shrink-0">
                   <div className="hidden sm:inline text-xs text-gray-500">Messages</div>
                   {/* Kebab menu button */}
                   <button
@@ -552,7 +602,7 @@ export default function Messages(){
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-5 md:w-6 h-5 md:h-6 text-gray-600" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
                   </button>
                   {showActions && (
-                    <div className="absolute right-2 md:right-0 top-full mt-2 w-48 md:w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-20 animate-fade-in">
+                    <div ref={actionsRef} className="absolute right-0 top-full mt-2 w-48 md:w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-20">
                       <ul className="py-1 text-sm" role="menu">
                         <li>
                           <button

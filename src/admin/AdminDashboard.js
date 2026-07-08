@@ -4,20 +4,20 @@ import FullScreenLoader from '../components/FullScreenLoader';
 import DashboardOverview from './DashboardOverview';
 import UserManagement from './UserManagement';
 import ProductManagement from './ProductManagement';
-import OrdersManagement from './OrdersManagement';
 import Report from './Report';
 import ArchivePage from './ArchivePage';
+import AppealsPage from './AppealsPage';
 import authFetch from '../utils/authFetch';
 import PointsRewards from './PointsRewards';
 import Notifications from './Notifications';
 import Settings from './Settings';
+import DropOffManagement from './DropOffManagement';
 import { getAllProducts } from '../firebaseProductService';
 import { db } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { useLocation } from 'react-router-dom';
 
 const initialUsers = [];
-const initialOrders = [];
 const initialNotifications = [];
 const initialPoints = [];
 
@@ -26,11 +26,11 @@ export default function AdminDashboard() {
   const [pageLoading, setPageLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
-  const validPages = React.useMemo(() => new Set(['dashboard', 'users', 'products', 'orders', 'archive', 'report', 'points', 'notifications', 'settings']), []);
+  const validPages = React.useMemo(() => new Set(['dashboard', 'users', 'products', 'dropoffs', 'archive', 'appeals', 'report', 'points', 'notifications', 'settings']), []);
   const lastSectionRef = React.useRef(null);
   const [users, setUsers] = useState(initialUsers);
   const [products, setProducts] = useState([]);
-  const [orders, setOrders] = useState(initialOrders);
+  const [dropoffs, setDropoffs] = useState([]);
   React.useEffect(() => {
     async function loadProducts() {
       try {
@@ -83,97 +83,17 @@ export default function AdminDashboard() {
     loadUsers();
   }, []);
 
-  const loadOrders = React.useCallback(async () => {
-    try {
-      const qs = await getDocs(collection(db, 'orders'));
-      const list = qs.docs.map(d => ({ id: d.id, ...d.data() }));
-      // sort newest first
-      list.sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-      setOrders(list);
-    } catch (err) {
-      console.error('Error loading orders from Firestore:', err);
-      setOrders([]);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    loadOrders();
-    const onChanged = () => loadOrders();
-    window.addEventListener('orders-changed', onChanged);
-    const id = window.setInterval(loadOrders, 30000);
-    return () => {
-      window.removeEventListener('orders-changed', onChanged);
-      window.clearInterval(id);
-    };
-  }, [loadOrders]);
-
-  const refreshOrders = React.useCallback(async () => {
-    try {
-      setPageLoading(true);
-      await loadOrders();
-    } catch (e) {
-      // ignore
-    } finally {
-      setPageLoading(false);
-    }
-  }, [loadOrders]);
-
   // When active page changes, ensure page loading state clears when data is ready
   React.useEffect(() => {
     let cancelled = false;
     async function onPageChange() {
-      // If switching to orders/archive, reload orders and clear loading afterwards
-      if (activePage === 'orders' || activePage === 'archive') {
-        try {
-          await loadOrders();
-        } catch (e) {}
-        if (!cancelled) setPageLoading(false);
-        return;
-      }
       // For other pages, hide the loading overlay shortly
       const t = window.setTimeout(() => { if (!cancelled) setPageLoading(false); }, 350);
       return () => window.clearTimeout(t);
     }
     const cleanup = onPageChange();
     return () => { cancelled = true; if (cleanup && typeof cleanup.then !== 'function') cleanup(); };
-  }, [activePage, loadOrders]);
-  const lastSeenOrderIdRef = React.useRef(null);
-  const [orderPopup, setOrderPopup] = useState({ open: false, order: null });
-  React.useEffect(() => {
-    let cancelled = false;
-    async function checkLatest() {
-      try {
-        const { collection, query, orderBy, limit, getDocs } = await import('firebase/firestore');
-        const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(1));
-        const snap = await getDocs(q);
-        if (cancelled) return;
-        if (!snap || snap.empty) return;
-        const d = snap.docs[0];
-        const latest = { id: d.id, ...d.data() };
-        if (latest.id && latest.id !== lastSeenOrderIdRef.current) {
-          lastSeenOrderIdRef.current = latest.id;
-          setOrderPopup({ open: true, order: latest });
-        }
-      } catch (e) {
-        console.warn('Failed to fetch latest order for admin popup', e);
-      }
-    }
-    // Initialize last seen order id to avoid popping for existing orders
-    (async () => {
-      try {
-        const { collection, query, orderBy, limit, getDocs } = await import('firebase/firestore');
-        const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(1));
-        const snap = await getDocs(q);
-        if (!snap || snap.empty) return;
-        const d = snap.docs[0];
-        lastSeenOrderIdRef.current = d.id;
-      } catch (e) { /* ignore init error */ }
-    })();
-
-    const handler = () => { checkLatest(); };
-    window.addEventListener('orders-changed', handler);
-    return () => { cancelled = true; window.removeEventListener('orders-changed', handler); };
-  }, []);
+  }, [activePage]);
   const [reportItems, setReportItems] = useState([]);
   const [notifications, setNotifications] = useState(initialNotifications);
   const [points, setPoints] = useState(initialPoints);
@@ -195,6 +115,26 @@ export default function AdminDashboard() {
     }
   }, []);
 
+
+
+  const loadDropoffs = React.useCallback(async () => {
+    try {
+      const { auth } = await import('../firebase');
+      if (!auth.currentUser) return;
+      const res = await authFetch('/api/products/dropoff/list');
+      if (res.ok) {
+        const json = await res.json();
+        const arr = Array.isArray(json) ? json : (json.items || []);
+        setDropoffs(arr);
+      } else {
+        setDropoffs([]);
+      }
+    } catch (err) {
+      console.warn('Backend dropoffs fetch failed:', err.message);
+      setDropoffs([]);
+    }
+  }, []);
+
   React.useEffect(() => { loadReports(); }, [loadReports]);
 
   React.useEffect(() => {
@@ -202,6 +142,41 @@ export default function AdminDashboard() {
       loadReports();
     }
   }, [activePage, loadReports]);
+
+
+
+  React.useEffect(() => {
+    if (activePage === 'dropoffs') {
+      loadDropoffs();
+    }
+  }, [activePage, loadDropoffs]);
+
+  // Refresh products when navigating to Archive tab
+  React.useEffect(() => {
+    if (activePage === 'archive') {
+      async function refreshProducts() {
+        try {
+          const res = await fetch('/api/products?admin=true&includeSeller=true');
+          if (res.ok) {
+            const data = await res.json();
+            const items = Array.isArray(data) ? data : (data.items || []);
+            setProducts(items);
+            return;
+          }
+        } catch (err) {
+          console.warn('Backend refresh failed, using Firestore:', err.message);
+        }
+        
+        try {
+          const data = await getAllProducts();
+          setProducts(data);
+        } catch (err) {
+          console.error('Error refreshing products:', err);
+        }
+      }
+      refreshProducts();
+    }
+  }, [activePage]);
 
   // Listen for navigation events to open the Archive tab when items are archived
   React.useEffect(() => {
@@ -211,6 +186,35 @@ export default function AdminDashboard() {
     }
     window.addEventListener('navigate-archive', handleNavigateArchive);
     return () => window.removeEventListener('navigate-archive', handleNavigateArchive);
+  }, []);
+
+  // Listen for product updates and refresh
+  React.useEffect(() => {
+    function handleProductUpdated() {
+      async function refreshProducts() {
+        try {
+          const res = await fetch('/api/products?admin=true&includeSeller=true');
+          if (res.ok) {
+            const data = await res.json();
+            const items = Array.isArray(data) ? data : (data.items || []);
+            setProducts(items);
+            return;
+          }
+        } catch (err) {
+          console.warn('Backend refresh failed:', err.message);
+        }
+        
+        try {
+          const data = await getAllProducts();
+          setProducts(data);
+        } catch (err) {
+          console.error('Error refreshing products:', err);
+        }
+      }
+      refreshProducts();
+    }
+    window.addEventListener('product-updated', handleProductUpdated);
+    return () => window.removeEventListener('product-updated', handleProductUpdated);
   }, []);
 
   React.useEffect(() => {
@@ -242,25 +246,26 @@ export default function AdminDashboard() {
   function renderPage() {
     switch (activePage) {
       case 'dashboard':
-        return <DashboardOverview users={users} products={products} orders={orders} reports={reportItems} points={points} />;
+        return <DashboardOverview users={users} products={products} reports={reportItems} points={points} dropoffs={dropoffs} />;
       case 'users':
         return <UserManagement users={users} setUsers={setUsers} />;
       case 'products':
         return <ProductManagement products={products} setProducts={setProducts} />;
-      case 'orders':
-        return <OrdersManagement orders={orders} setOrders={setOrders} onRefresh={refreshOrders} />;
+      case 'dropoffs':
+        return <DropOffManagement dropoffs={dropoffs} loading={false} onLoadDropoffs={loadDropoffs} />;
       case 'archive':
         return (
           <ArchivePage
-            orders={orders}
-            setOrders={setOrders}
             users={users}
             setUsers={setUsers}
             reports={reportItems}
             setReports={setReportItems}
-            refreshOrders={refreshOrders}
+            products={products}
+            setProducts={setProducts}
           />
         );
+      case 'appeals':
+        return <AppealsPage />;
       case 'report':
         return <Report />;
       case 'points':
@@ -270,7 +275,7 @@ export default function AdminDashboard() {
       case 'settings':
         return <Settings />;
       default:
-        return <DashboardOverview users={users} products={products} orders={orders} reports={reportItems} points={points} />;
+        return <DashboardOverview users={users} products={products} reports={reportItems} points={points} dropoffs={dropoffs} />;
     }
   }
 
@@ -287,23 +292,6 @@ export default function AdminDashboard() {
         <span className={`block w-6 h-0.5 bg-teal-700 mb-1 transition-opacity duration-300 ${sidebarOpen ? 'opacity-0' : 'opacity-100'}`}></span>
         <span className={`block w-6 h-0.5 bg-teal-700 transform transition duration-300 ${sidebarOpen ? '-translate-y-1.5 -rotate-45' : ''}`}></span>
       </button>
-
-      {orderPopup.open && orderPopup.order && (
-        <div className="fixed top-4 right-4 z-50 w-80 bg-white border rounded-lg shadow-lg p-3">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="text-sm text-gray-500">New order received</div>
-              <div className="font-semibold mt-1">{orderPopup.order.productTitle || 'Order'}</div>
-              <div className="text-xs text-gray-600 mt-1">Type: {orderPopup.order.type || 'delivery'}</div>
-              <div className="text-xs text-gray-600">From: {orderPopup.order.buyerName || orderPopup.order.buyerId || 'Unknown'}</div>
-            </div>
-            <div className="ml-2 flex flex-col items-end">
-              <button className="text-sm text-gray-500 mb-2" onClick={() => { setOrderPopup({ open: false, order: null }); }}>Close</button>
-              <button className="text-xs bg-teal-600 text-white px-2 py-1 rounded" onClick={() => { setActivePage('orders'); setOrderPopup({ open: false, order: null }); }}>View</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="hidden lg:block">
         <Sidebar activePage={activePage} setActivePage={(k)=>{ setPageLoading(true); setActivePage(k); }} className="h-screen sticky top-0" />

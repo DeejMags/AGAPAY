@@ -1,5 +1,6 @@
 const { admin, db } = require('../config/firebaseAdmin');
 const { FieldValue } = admin && admin.firestore ? admin.firestore : { FieldValue: null };
+const { buildUserNameData } = require('../utils/nameUtils');
 
 function millisFromFirestore(ts) {
 	if (!ts) return null;
@@ -23,6 +24,66 @@ function ensureFirebaseEnabled(res) {
 	return true;
 }
 
+// Check if a string looks like a Firebase UID (alphanumeric, 20-28 chars)
+function looksLikeUid(str) {
+	if (!str || typeof str !== 'string') return false;
+	return /^[a-zA-Z0-9]{20,28}$/.test(String(str).trim());
+}
+
+// Resolve a user's normalized display name and avatar from Firestore
+async function resolveUserProfileName(userId) {
+	if (!userId) return { name: null, avatar: null };
+	try {
+		// Try direct doc lookup first
+		let uDoc = await db.collection('users').doc(String(userId)).get();
+		if (!uDoc.exists) {
+			const q = await db.collection('users').where('authId', '==', String(userId)).limit(1).get();
+			if (!q.empty) uDoc = q.docs[0];
+		}
+		
+		let ud = {};
+		let email = null;
+		
+		if (uDoc && uDoc.exists) {
+			ud = uDoc.data() || {};
+			email = ud.email;
+		}
+		
+		// If no email in Firestore, try to fetch from Firebase Auth
+		if (!email && admin && admin.auth) {
+			try {
+				const authUser = await admin.auth().getUser(String(userId));
+				email = authUser.email;
+			} catch (e) {
+				// Auth user not found, continue without email
+			}
+		}
+		
+		// Build name data from all available fields
+		const nameData = buildUserNameData({
+			firstName: ud.firstName,
+			lastName: ud.lastName,
+			name: ud.name,
+			username: ud.username,
+			displayName: ud.displayName,
+			fullName: ud.fullName,
+			email: email,
+		});
+		
+		// Reject UID-looking names and use displayName as fallback
+		let name = looksLikeUid(nameData.displayName) ? null : nameData.displayName;
+		if (!name && email) {
+			name = String(email).split('@')[0];
+		}
+		
+		const avatar = ud.profilePic || ud.avatar || null;
+		return { name, avatar };
+	} catch (e) { 
+		console.error('resolveUserProfileName error:', e);
+	}
+	return { name: null, avatar: null };
+}
+
 // GET /api/messages/conversations
 async function listConversations(req, res) {
 	if (!ensureFirebaseEnabled(res)) return;
@@ -32,23 +93,47 @@ async function listConversations(req, res) {
 		const q = db.collection('conversation').where('participants', 'array-contains', uid);
 		const snap = await q.get();
 		const out = [];
-				snap.forEach(doc => {
+		snap.forEach(doc => {
 			const data = doc.data() || {};
 			const participants = sanitizeParticipants(data.participants);
 			const other = participants.find(p => p !== uid) || null;
-						const unreadMap = data.unread || {};
-				// Only show unread for this user
-						const unreadCount = Number(unreadMap[uid] || 0);
-						// Also expose the other user's unread count (i.e., have they read my last message?)
-						const otherUnreadCount = other ? Number(unreadMap[other] || 0) : 0;
+			const unreadMap = data.unread || {};
+			const unreadCount = Number(unreadMap[uid] || 0);
+			const otherUnreadCount = other ? Number(unreadMap[other] || 0) : 0;
 			const last = data.lastMessage || null;
 			const lastAt = millisFromFirestore(data.lastMessageAt || data.updatedAt || data.lastUpdated || data.updatedAt);
-					const participantNames = data.participantNames || {};
-					const participantAvatars = data.participantAvatars || {};
-					const otherName = other ? (participantNames[other] || null) : null;
-					const otherAvatar = other ? (participantAvatars[other] || null) : null;
-							out.push({ conversationId: doc.id, participants, otherId: other, otherName, otherAvatar, title: data.title || data.productName || null, lastMessage: last ? { id: last.id || null, text: last.text || last.message || '', senderId: last.senderId || last.sender || null, createdAt: millisFromFirestore(last.createdAt || last.timeStamp || last.time) } : null, lastMessageAt: lastAt, unreadCount, otherUnreadCount });
+			const participantNames = data.participantNames || {};
+			const participantAvatars = data.participantAvatars || {};
+			// Store stale values for now; we'll overwrite with fresh lookups below
+			const storedName = other ? (participantNames[other] || null) : null;
+			const storedAvatar = other ? (participantAvatars[other] || null) : null;
+			out.push({ conversationId: doc.id, participants, otherId: other, otherName: storedName, otherAvatar: storedAvatar, title: data.title || data.productName || null, lastMessage: last ? { id: last.id || null, text: last.text || last.message || '', senderId: last.senderId || last.sender || null, createdAt: millisFromFirestore(last.createdAt || last.timeStamp || last.time) } : null, lastMessageAt: lastAt, unreadCount, otherUnreadCount });
 		});
+
+		// Batch-resolve participant names/avatars from user profiles (up-to-date, uses first+last name)
+		const uniqueOtherIds = [...new Set(out.map(c => c.otherId).filter(Boolean))];
+		if (uniqueOtherIds.length > 0) {
+			const resolved = await Promise.all(
+				uniqueOtherIds.map(async id => ({ id, ...(await resolveUserProfileName(id)) }))
+			);
+			const profileMap = {};
+			resolved.forEach(r => { profileMap[r.id] = r; });
+			out.forEach(c => {
+				if (c.otherId && profileMap[c.otherId]) {
+					// ALWAYS overwrite with fresh profile data to prevent stale UIDs from showing
+					if (profileMap[c.otherId].name) {
+						c.otherName = profileMap[c.otherId].name;
+					} else {
+						// If no name found, clear the field to force frontend fallback
+						c.otherName = null;
+					}
+					if (profileMap[c.otherId].avatar) {
+						c.otherAvatar = profileMap[c.otherId].avatar;
+					}
+				}
+			});
+		}
+
 		// sort by lastMessageAt desc
 		out.sort((a,b)=> (b.lastMessageAt||0) - (a.lastMessageAt||0));
 		res.json(out);
@@ -166,7 +251,7 @@ async function startConversation(req, res) {
 			productId: productId || null,
 			productName: productName || null,
 			productImage: productImage || null,
-				participantNames: { [uid]: (req.user && (req.user.username || req.user.name || req.user.email)) || null },
+				participantNames: { [uid]: (req.user && (req.user.displayName || req.user.fullName || req.user.name || req.user.username || req.user.email)) || null },
 				participantAvatars: { [uid]: (req.user && (req.user.avatar || req.user.profilePic || null)) || null },
 			createdAt: admin.firestore.FieldValue.serverTimestamp(),
 			updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -279,14 +364,23 @@ async function sendMessage(req, res) {
 				const names = Object.assign({}, cdata.participantNames || {});
 				const avatars = Object.assign({}, cdata.participantAvatars || {});
 				// sender
-				if (!names[uid]) names[uid] = (req.user && (req.user.username || req.user.name || req.user.email)) || null;
+				if (!names[uid]) names[uid] = (req.user && (req.user.displayName || req.user.fullName || req.user.name || req.user.username || req.user.email)) || null;
 				// receiver resolve minimal profile
 				if (!names[unreadKey]) {
 					try {
 						const uDoc = await db.collection('users').doc(String(unreadKey)).get();
 						if (uDoc.exists) {
 							const ud = uDoc.data() || {};
-							names[unreadKey] = ud.username || ud.name || ud.email || null;
+							const nameData = buildUserNameData({
+								firstName: ud.firstName,
+								lastName: ud.lastName,
+								name: ud.name,
+								username: ud.username,
+								displayName: ud.displayName,
+								fullName: ud.fullName,
+								email: ud.email,
+							});
+							names[unreadKey] = nameData.displayName || nameData.username || ud.email || null;
 							avatars[unreadKey] = ud.profilePic || ud.avatar || null;
 						}
 					} catch (e) { /* ignore */ }

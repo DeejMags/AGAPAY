@@ -57,10 +57,12 @@ export default function ProductManagement({ products: parentProducts = null, set
     load();
   }, [parentProducts, setParentProducts, statusFilter]);
 
-  const filtered = products.filter(p => {
-    const q = search.toLowerCase();
-    return (p.title || '').toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q);
-  });
+  const filtered = products
+    .filter(p => !p.dropoffJunkshop)
+    .filter(p => {
+      const q = search.toLowerCase();
+      return (p.title || '').toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q);
+    });
 
     async function handleApprove(id) {
     try {
@@ -99,30 +101,34 @@ export default function ProductManagement({ products: parentProducts = null, set
       const res = await authFetch(`/api/products/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'denied', adminMessage: reason })
+        body: JSON.stringify({ archived: true, archivedReason: reason || 'Denied by admin' })
       });
-      if (!res.ok) throw new Error('Backend deny failed');
+      if (!res.ok) throw new Error('Backend archive failed');
       const updated = await res.json();
-      if (setProducts) setProducts(products.map(p => (p.id === id ? { ...p, ...updated } : p)));
-  try { window.dispatchEvent(new CustomEvent('product-updated', { detail: { id, action: 'deny' } })); } catch(e){}
+      const updateFn = (p) => (p.id === id || p._id === id) ? { ...p, ...updated, archived: true, archivedReason: reason || 'Denied by admin' } : p;
+      setProducts(products.map(updateFn));
+      if (setParentProducts) setParentProducts(prev => (prev || []).map(updateFn));
+      try { window.dispatchEvent(new CustomEvent('product-updated', { detail: { id, action: 'archive' } })); } catch(e){}
+      alert('Product archived. You can restore it from the Archive tab.');
       return;
     } catch (err) {
+      console.error('Archive failed:', err);
       // Fallback to Firestore client
+      const updateFn = (p) => (p.id === id || p._id === id) ? { ...p, archived: true, archivedReason: reason || 'Denied by admin' } : p;
+      setProducts(products.map(updateFn));
+      if (setParentProducts) setParentProducts(prev => (prev || []).map(updateFn));
+      try { window.dispatchEvent(new CustomEvent('product-updated', { detail: { id, action: 'archive' } })); } catch(e){}
+      alert('Product archived. You can restore it from the Archive tab.');
     }
-    setProducts(products.map(p => (p.id === id || p._id === id) ? { ...p, status: 'denied', adminMessage: reason } : p));
-    if (setParentProducts) setParentProducts(prev => prev.map(p => (p.id === id || p._id === id) ? { ...p, status: 'denied', adminMessage: reason } : p));
-    try { window.dispatchEvent(new CustomEvent('product-updated', { detail: { id, action: 'deny' } })); } catch(e){}
   }
+
   async function handleDelete(id) {
     const stringId = typeof id === 'string' ? id : String(id);
     try {
-  const res = await authFetch(`/api/products/${stringId}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/products/${stringId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Backend delete failed');
     } catch (err) {
-      // Fallback to Firestore client
-      // Optionally implement Firestore client delete here
-      // import { deleteDoc, doc } from 'firebase/firestore';
-      // await deleteDoc(doc(db, 'products', stringId));
+      console.warn('Delete failed:', err);
     }
     setProducts(products.filter(p => p.id !== stringId && p._id !== stringId));
     if (setParentProducts) setParentProducts(prev => prev.filter(p => p.id !== stringId && p._id !== stringId));
@@ -134,17 +140,6 @@ export default function ProductManagement({ products: parentProducts = null, set
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // Archive modal state
-  const [archiveOpen, setArchiveOpen] = useState(false);
-  const [archiveTarget, setArchiveTarget] = useState(null);
-  const [archiveLoading, setArchiveLoading] = useState(false);
-  const [archiveReason, setArchiveReason] = useState('');
-
-  function openArchive(id) {
-    setArchiveTarget(id);
-    setArchiveReason('');
-    setArchiveOpen(true);
-  }
 
   function openDeleteConfirm(id) {
     setDeleteTarget(id);
@@ -164,35 +159,6 @@ export default function ProductManagement({ products: parentProducts = null, set
       setDeleteLoading(false);
       setDeleteConfirmOpen(false);
       setDeleteTarget(null);
-    }
-  }
-
-  async function confirmArchive() {
-    const id = archiveTarget;
-    if (!id) return setArchiveOpen(false);
-    setArchiveLoading(true);
-    try {
-      try {
-        const res = await authFetch(`/api/products/${id}`, {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'Archived', archiveReason: archiveReason || null })
-        });
-        if (!res.ok) throw new Error('Backend archive failed');
-        const updated = await res.json();
-        setProducts(prev => prev.map(p => (p.id === id || p._id === id) ? { ...p, ...updated } : p));
-        if (setParentProducts) setParentProducts(prev => prev.map(p => (p.id === id || p._id === id) ? { ...p, ...updated } : p));
-      } catch (err) {
-        // Fallback: mark locally as archived
-        setProducts(prev => prev.map(p => (p.id === id || p._id === id) ? { ...p, status: 'Archived', archiveReason: archiveReason || '' } : p));
-        if (setParentProducts) setParentProducts(prev => prev.map(p => (p.id === id || p._id === id) ? { ...p, status: 'Archived', archiveReason: archiveReason || '' } : p));
-      }
-      try { window.dispatchEvent(new CustomEvent('product-updated', { detail: { id, action: 'archive' } })); } catch(e){}
-      // navigate to Archive tab
-      try { window.dispatchEvent(new Event('navigate-archive')); } catch(_){}
-    } finally {
-      setArchiveLoading(false);
-      setArchiveOpen(false);
-      setArchiveTarget(null);
-      setArchiveReason('');
     }
   }
   function refresh() {
@@ -274,11 +240,10 @@ export default function ProductManagement({ products: parentProducts = null, set
                   <td className="p-3">{p.sellerName || p.sellerDisplayName || (p.sellerEmail ? String(p.sellerEmail).split('@')[0] : '') || p.sellerId || 'Unknown'}</td>
                   <td className="p-3 text-xs">{p.location ? p.location : ((p.locationLat !== undefined && p.locationLng !== undefined && p.locationLat !== null && p.locationLng !== null) ? `${(Number(p.locationLat)).toFixed ? Number(p.locationLat).toFixed(4) : p.locationLat}, ${(Number(p.locationLng)).toFixed ? Number(p.locationLng).toFixed(4) : p.locationLng}` : '—')}</td>
                   <td className="p-3 flex gap-2 flex-wrap">
-                    {/* If item is sold, show delete and archive buttons */}
+                    {/* If item is sold, show delete button */}
                     {((p.status || '').toString().toLowerCase() === 'sold') ? (
                       <>
                         <button className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition" onClick={()=>openDeleteConfirm(p.id || p._id)}>Delete</button>
-                        <button className="px-3 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 transition" onClick={()=>openArchive(p.id || p._id)}>Archive</button>
                       </>
                     ) : (
                       <>
@@ -291,7 +256,6 @@ export default function ProductManagement({ products: parentProducts = null, set
                         )}
                         {/* Admin does not mark items as sold here; status is display-only per request */}
                         <button className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition" onClick={()=>openDeleteConfirm(p.id || p._id)}>Delete</button>
-                        <button className="px-3 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 transition" onClick={()=>openArchive(p.id || p._id)}>Archive</button>
                       </>
                     )}
                   </td>
@@ -307,21 +271,6 @@ export default function ProductManagement({ products: parentProducts = null, set
         initialReason={denyInitialReason}
         onSubmit={(reason) => submitDeny(reason)}
       />
-      <ConfirmModal
-        open={archiveOpen}
-        title="Archive product"
-        onCancel={() => { setArchiveOpen(false); setArchiveTarget(null); setArchiveReason(''); }}
-        onConfirm={confirmArchive}
-        confirmLabel="Archive"
-        confirmDanger={true}
-        confirmLoading={archiveLoading}
-      >
-        <div className="mb-2">You are about to archive this product. It will be hidden from default listings but retained for records.</div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Reason (optional)</label>
-          <textarea value={archiveReason} onChange={e=>setArchiveReason(e.target.value)} className="w-full border rounded p-2 mt-1" rows={3} />
-        </div>
-      </ConfirmModal>
       <ConfirmModal
         open={deleteConfirmOpen}
         title="Delete product"

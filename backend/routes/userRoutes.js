@@ -17,6 +17,9 @@ router.delete('/:id', firebaseCtrl.deleteUser)
 router.post('/:id/ban', auth, firebaseCtrl.banUser)
 router.post('/:id/unban', auth, firebaseCtrl.unbanUser)
 router.post('/:id/archive', auth, firebaseCtrl.archiveUser)
+router.post('/:id/unarchive', auth, firebaseCtrl.unarchiveUser)
+// Admin: batch set locations (testing/setup helper)
+router.post('/admin/batch-set-locations', auth, firebaseCtrl.batchSetLocations)
 // Deactivate currently authenticated user
 router.post('/deactivate', auth, firebaseCtrl.deactivateSelf)
 
