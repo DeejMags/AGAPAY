@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import authFetch from '../utils/authFetch';
-import { auth, db } from '../firebase';
+import { auth } from '../firebase';
 import { Link } from 'react-router-dom';
 import ListNewItemModal from '../seller/ListNewItemModal';
 import ListingsPanel from '../seller/ListingsPanel';
@@ -38,7 +38,7 @@ export default function SellerDashboard() {
     // Fetch user from localStorage and listings from backend (or Firestore fallback)
     const u = JSON.parse(localStorage.getItem('user') || 'null');
     setUser(u);
-    // Allow other pages (e.g., Reviews) to request a specific starting view
+    // Allow other pages to request a specific starting view via localStorage
     const targetView = localStorage.getItem('seller_dashboard_target_view');
     if (targetView) {
       setView(targetView);
@@ -295,12 +295,6 @@ export default function SellerDashboard() {
                   <span className="w-5 text-lg">🌱</span>
                   <span>Impact Report</span>
                 </button>
-              </li>
-              <li>
-                <Link to="/reviews" className="flex items-center gap-2 text-gray-700 hover:text-teal-700 hover:bg-teal-50 px-3 py-2 rounded-md">
-                  <span className="w-5 text-lg">⭐</span>
-                  <span>Reviews</span>
-                </Link>
               </li>
             </ul>
           </div>

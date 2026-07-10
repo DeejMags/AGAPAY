@@ -103,14 +103,6 @@ const NON_ACCEPTABLE_ITEMS = [
   'Any Glass'
 ];
 
-/**
- * Gamification points calculation
- * Returns points based on kilograms recycled with tiered bonuses
- * Base: 5 kg = 1 point
- * Tier 1 (50+ kg): 10% bonus = 5.5 points per 50kg
- * Tier 2 (100+ kg): 20% bonus = 11 points per 100kg
- * Tier 3 (200+ kg): 30% bonus = 22.5 points per 200kg
- */
 function calculatePointsFromKilograms(weightInKg) {
   if (!weightInKg || weightInKg <= 0) return 0;
   

@@ -19,7 +19,6 @@ import AdminDashboard from './admin/AdminDashboard'
 import SellerDashboard from './pages/SellerDashboard'
 import Listings from './pages/Listings'
 import UserSettings from './pages/UserSettings'
-import Reviews from './seller/Reviews'
 import Community from './seller/Community'
 
 function App(){
@@ -185,7 +184,6 @@ function App(){
               <Route path="/listings" element={<ProtectedRoute><Listings/></ProtectedRoute>} />
               <Route path="/dashboard" element={<ProtectedRoute><SellerDashboard/></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><UserSettings/></ProtectedRoute>} />
-              <Route path="/reviews" element={<ProtectedRoute><Reviews/></ProtectedRoute>} />
               <Route path="/community" element={<ProtectedRoute><Community/></ProtectedRoute>} />
               <Route path="*" element={<NotFound/>} />
             </Routes>

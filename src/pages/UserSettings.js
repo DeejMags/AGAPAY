@@ -180,7 +180,7 @@ export default function UserSettings() {
           {isEditing ? (
             <input
               type="tel"
-              placeholder="Phone Number (optional)"
+              placeholder="Phone Number"
               value={profile.phone}
               onChange={(e) => setProfile((p) => ({ ...p, phone: e.target.value }))}
               className="border rounded p-2"

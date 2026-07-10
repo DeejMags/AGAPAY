@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react'
-import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { useParams, useLocation } from 'react-router-dom'
 import RatingStars from '../components/RatingStars'
 import MapEmbed from '../components/MapEmbed'
 import ProductCard from '../components/ProductCard'
@@ -72,7 +72,6 @@ function ProfileHeader({ me, onPicChange, menu }) {
   );
 }
   const { id } = useParams()
-  const navigate = useNavigate()
   const location = useLocation()
   const hintState = location && location.state && location.state.userHint ? location.state.userHint : null
   const hintRef = useRef(hintState)
@@ -574,7 +573,6 @@ function ProfileHeader({ me, onPicChange, menu }) {
       </button>
       {menuOpen && (
         <div role="menu" className="absolute right-0 mt-2 w-44 bg-white border rounded-lg shadow-lg z-50">
-          <button role="menuitem" className="w-full text-left px-3 py-2 hover:bg-gray-50" onClick={() => { setMenuOpen(false); navigate('/reviews'); }}>Review seller</button>
           <button role="menuitem" className="w-full text-left px-3 py-2 hover:bg-gray-50 text-red-600" onClick={() => { setMenuOpen(false); setShowReport(true); }}>Report seller</button>
         </div>
       )}

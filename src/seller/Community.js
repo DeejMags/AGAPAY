@@ -49,15 +49,7 @@ export default function Community() {
                   <span>Impact Report</span>
                 </button>
               </li>
-              <li>
-                <button
-                  className={`relative ${navBtn('reviews')}`}
-                  onClick={() => navigate('/reviews')}
-                >
-                  <span className="w-5 text-lg">⭐</span>
-                  <span>Reviews</span>
-                </button>
-              </li>
+
             </ul>
           </div>
           <div className="mt-8">

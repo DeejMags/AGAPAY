@@ -5,7 +5,7 @@ import { postProduct as postProductViaService } from '../firebaseProductService'
 
 export default function ListNewItemModal({ open, onClose, onAdd, editItem = null, onUpdate }) {
   const [form, setForm] = useState({ title: '', description: '', category: '', price: '', location: '', locationLat: '', locationLng: '', images: [], delivery: false, pickup: false, dropoffJunkshop: false, dropoffDate: '', dropoffTime: '' });
-  const categories = ['Metals', 'Plastics', 'Paper', 'Card Boards', 'Electronics'];
+  const categories = ['Metals', 'Plastics', 'Paper', 'Card Boards', 'Electronics', 'Others'];
   const priceOptions = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 200, 300, 400, 500];
   const [imgPreview, setImgPreview] = useState([]);
   const [isSaving, setIsSaving] = useState(false);

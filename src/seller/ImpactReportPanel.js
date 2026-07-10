@@ -33,7 +33,7 @@ export default function ImpactReportPanel() {
   const [loading, setLoading] = useState(true);
   const [sold, setSold] = useState(0);
   const [points, setPoints] = useState(0);
-  const [goals] = useState({ sold: 20, points: 1000 }); // add points goal for UI only
+  // goals are computed dynamically below — no state needed
   const unsubRef = useRef(null);
   const userUnsubRef = useRef(null);
   const historyUnsubRef = useRef(null);
@@ -555,6 +555,11 @@ export default function ImpactReportPanel() {
     const badgeProgress = computeProgressToNext(safePoints, currentBadgeMeta, nextBadgeMeta);
     const badgeUnlockedList = BADGE_ORDER.filter(tier => (badgeState.unlocked || []).includes(tier));
     const pointsToNext = nextBadgeMeta ? Math.max(0, nextBadgeMeta.minPoints - safePoints) : 0;
+
+    // Dynamic goals for progress bars
+    const SOLD_MILESTONES = [5, 10, 25, 50, 100, 200];
+    const soldGoal = SOLD_MILESTONES.find(m => m > sold) || (Math.ceil((sold + 1) / 10) * 10);
+    const pointsGoal = nextBadgeMeta ? nextBadgeMeta.minPoints : null;
     const badgeDescription = profileVisible
       ? (currentBadgeMeta?.description || 'Keep earning points to unlock your first badge.')
       : 'Badge hidden from your profile. Toggle visibility whenever you are ready to showcase it.';
@@ -593,11 +598,11 @@ export default function ImpactReportPanel() {
           </div>
           <div className="mt-4">
             <div className="w-full bg-white/80 rounded-full h-2 overflow-hidden shadow-inner">
-              <div className="h-2 bg-blue-500 transition-all" style={{ width: `${pct(sold, goals.sold)}%` }} />
+              <div className="h-2 bg-blue-500 transition-all" style={{ width: `${loading ? 0 : pct(sold, soldGoal)}%` }} />
             </div>
             <div className="mt-2 flex justify-between text-xs text-blue-700/80">
-              <span>{pct(sold, goals.sold)}% of goal</span>
-              <span>Goal: {goals.sold}</span>
+              <span>{loading ? '—' : `${pct(sold, soldGoal)}% of goal`}</span>
+              <span>Goal: {soldGoal} items</span>
             </div>
           </div>
         </div>
@@ -612,11 +617,11 @@ export default function ImpactReportPanel() {
           </div>
           <div className="mt-4">
             <div className="w-full bg-white/80 rounded-full h-2 overflow-hidden shadow-inner">
-               <div className="h-2 bg-emerald-500 transition-all" style={{ width: `${pct(safePoints, goals.points)}%` }} />
+               <div className="h-2 bg-emerald-500 transition-all" style={{ width: `${loading ? 0 : (pointsGoal ? pct(safePoints, pointsGoal) : 100)}%` }} />
             </div>
             <div className="mt-2 flex justify-between text-xs text-emerald-700/80">
-              <span>{pct(safePoints, goals.points)}% of goal</span>
-              <span>Goal: {goals.points.toLocaleString()}</span>
+              <span>{loading ? '—' : (pointsGoal ? `${pct(safePoints, pointsGoal)}% of goal` : 'All badges unlocked!')}</span>
+              <span>{pointsGoal ? `Goal: ${pointsGoal.toLocaleString()} pts` : 'Max reached'}</span>
             </div>
           </div>
         </div>

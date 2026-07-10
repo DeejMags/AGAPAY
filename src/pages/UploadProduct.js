@@ -267,8 +267,9 @@ export default function UploadProduct(){
               <option value="metals">Metals</option>
               <option value="plastics">Plastics</option>
               <option value="paper">Paper</option>
-              <option value="glass">Glass</option>
+              <option value="card board">Card Board</option>
               <option value="electronics">Electronics</option>
+              <option value="others">Others</option>
             </select>
           </>
         )}

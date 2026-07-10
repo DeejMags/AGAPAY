@@ -17,7 +17,6 @@ import AdminDashboard from './admin/AdminDashboard';
 import SellerDashboard from './pages/SellerDashboard';
 import Listings from './pages/Listings';
 import UserSettings from './pages/UserSettings';
-import Reviews from './seller/Reviews';
 import Community from './seller/Community';
 import { Outlet } from 'react-router-dom';
 
@@ -52,7 +51,6 @@ export const router = createBrowserRouter([
       { path: 'listings', element: <ProtectedRoute><Listings /></ProtectedRoute> },
       { path: 'dashboard', element: <ProtectedRoute><SellerDashboard /></ProtectedRoute> },
       { path: 'settings', element: <ProtectedRoute><UserSettings /></ProtectedRoute> },
-      { path: 'reviews', element: <ProtectedRoute><Reviews /></ProtectedRoute> },
       { path: 'community', element: <ProtectedRoute><Community /></ProtectedRoute> },
       { path: '*', element: <NotFound /> }
     ]
